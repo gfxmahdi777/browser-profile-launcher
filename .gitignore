@@ -11,3 +11,5 @@ coverage/
 .local-appdata-sandbox/
 .aistudio/
 .playwright-cli/
+bun.lock
+
