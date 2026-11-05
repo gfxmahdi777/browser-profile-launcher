@@ -24,6 +24,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // electron/main.ts
 var import_electron = require("electron");
 var import_node_path6 = __toESM(require("node:path"), 1);
+var import_node_os3 = __toESM(require("node:os"), 1);
 var import_node_fs5 = __toESM(require("node:fs"), 1);
 
 // src/detect/detect.ts
@@ -668,10 +669,29 @@ var tray = null;
 var isQuitting = false;
 var watcher = null;
 var settingsManager = new SettingsManager(import_electron.app.getPath("userData"));
+var SAFE_SANDBOX_DIR = import_node_path6.default.join(import_electron.app.getPath("temp"), "bpl-sandbox-test");
 function getCachedDetection() {
-  return detectAllBrowsers();
+  const realDetection = detectAllBrowsers();
+  realDetection.watchedFiles = watcher ? watcher.getWatchedFiles() : [];
+  return realDetection;
+}
+function getTrayIconImage() {
+  const icoPath = import_node_path6.default.join(__dirname, "assets", "tray-icon.ico");
+  const pngPath = import_node_path6.default.join(__dirname, "assets", "tray-icon.png");
+  if (process.platform === "win32" && import_node_fs5.default.existsSync(icoPath)) {
+    return import_electron.nativeImage.createFromPath(icoPath);
+  }
+  if (import_node_fs5.default.existsSync(pngPath)) {
+    return import_electron.nativeImage.createFromPath(pngPath);
+  }
+  return import_electron.nativeImage.createEmpty();
 }
 function createWindow() {
+  const appIconPath = import_node_path6.default.join(
+    __dirname,
+    "assets",
+    process.platform === "win32" ? "app-icon.ico" : "app-icon.png"
+  );
   mainWindow = new import_electron.BrowserWindow({
     width: 390,
     height: 560,
@@ -681,9 +701,10 @@ function createWindow() {
     maximizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
+    title: "Browser Profile Launcher",
+    icon: import_node_fs5.default.existsSync(appIconPath) ? appIconPath : void 0,
     backgroundColor: "#020617",
-    // Match dark slate-950 theme
     webPreferences: {
       preload: import_node_path6.default.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -692,8 +713,9 @@ function createWindow() {
       devTools: !import_electron.app.isPackaged
     }
   });
-  if (import_electron.app.isPackaged || process.env.NODE_ENV === "production") {
-    mainWindow.loadFile(import_node_path6.default.join(__dirname, "../dist/index.html"));
+  const distIndex = import_node_path6.default.join(__dirname, "../dist/index.html");
+  if (import_electron.app.isPackaged || import_node_fs5.default.existsSync(distIndex)) {
+    mainWindow.loadFile(distIndex);
   } else {
     mainWindow.loadURL("http://localhost:3000");
   }
@@ -706,6 +728,7 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => {
     positionWindowNearTray();
     mainWindow?.show();
+    mainWindow?.focus();
   });
   mainWindow.on("blur", () => {
     if (!mainWindow?.webContents.isDevToolsOpened()) {
@@ -714,16 +737,24 @@ function createWindow() {
   });
 }
 function positionWindowNearTray() {
-  if (!mainWindow || !tray) return;
-  const trayBounds = tray.getBounds();
+  if (!mainWindow) return;
   const primaryDisplay = import_electron.screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
   const [windowWidth, windowHeight] = mainWindow.getSize();
-  let x = Math.round(trayBounds.x + trayBounds.width / 2 - windowWidth / 2);
-  let y = Math.round(trayBounds.y - windowHeight - 8);
-  if (x <= 0 || y <= 0 || x + windowWidth > screenWidth) {
-    x = screenWidth - windowWidth - 16;
-    y = screenHeight - windowHeight - 16;
+  let x = screenWidth - windowWidth - 16;
+  let y = screenHeight - windowHeight - 12;
+  if (tray) {
+    const trayBounds = tray.getBounds();
+    if (trayBounds.width > 0 && trayBounds.height > 0) {
+      const candidateX = Math.round(
+        trayBounds.x + trayBounds.width / 2 - windowWidth / 2
+      );
+      const candidateY = Math.round(trayBounds.y - windowHeight - 8);
+      if (candidateX > 0 && candidateX + windowWidth <= screenWidth && candidateY > 0) {
+        x = candidateX;
+        y = candidateY;
+      }
+    }
   }
   mainWindow.setPosition(x, y, false);
 }
@@ -741,9 +772,7 @@ function toggleWindow() {
   }
 }
 function createTray() {
-  const iconPath = import_node_path6.default.join(__dirname, "assets", "tray-icon.png");
-  const icon = import_node_fs5.default.existsSync(iconPath) ? import_electron.nativeImage.createFromPath(iconPath) : import_electron.nativeImage.createEmpty();
-  tray = new import_electron.Tray(icon);
+  tray = new import_electron.Tray(getTrayIconImage());
   tray.setToolTip("Browser Profile Launcher");
   tray.on("click", () => {
     toggleWindow();
@@ -755,7 +784,7 @@ function updateTrayContextMenu() {
   const openAtLogin = import_electron.app.getLoginItemSettings().openAtLogin;
   const contextMenu = import_electron.Menu.buildFromTemplate([
     {
-      label: "Open Launcher",
+      label: "Open",
       click: () => {
         if (!mainWindow) createWindow();
         positionWindowNearTray();
@@ -772,7 +801,9 @@ function updateTrayContextMenu() {
           openAtLogin: menuItem.checked,
           path: process.execPath
         });
-        settingsManager.updateGeneralSettings({ startWithWindows: menuItem.checked });
+        settingsManager.updateGeneralSettings({
+          startWithWindows: menuItem.checked
+        });
       }
     },
     { type: "separator" },
@@ -797,7 +828,11 @@ function setupIpc() {
   });
   import_electron.ipcMain.handle(
     "launch-profile",
-    (_event, { browserId, folderName, displayName }) => {
+    (_event, {
+      browserId,
+      folderName,
+      displayName
+    }) => {
       const detection = getCachedDetection();
       const browser = detection.browsers.find((b) => b.id === browserId);
       const def = SUPPORTED_BROWSERS.find((b) => b.id === browserId);
@@ -807,8 +842,16 @@ function setupIpc() {
   );
   import_electron.ipcMain.handle(
     "update-profile-settings",
-    (_event, { browserId, folderName, customization }) => {
-      return settingsManager.updateProfileCustomization(browserId, folderName, customization);
+    (_event, {
+      browserId,
+      folderName,
+      customization
+    }) => {
+      return settingsManager.updateProfileCustomization(
+        browserId,
+        folderName,
+        customization
+      );
     }
   );
   import_electron.ipcMain.handle("update-general-settings", (_event, settings) => {
@@ -832,12 +875,138 @@ function setupIpc() {
   });
   import_electron.ipcMain.handle(
     "create-shortcut",
-    (_event, { browserId, folderName, displayName }) => {
+    (_event, {
+      browserId,
+      folderName,
+      displayName
+    }) => {
       const detection = getCachedDetection();
       const browser = detection.browsers.find((b) => b.id === browserId);
       const def = SUPPORTED_BROWSERS.find((b) => b.id === browserId);
       const exe = browser?.executablePath || def?.standardExePaths[0] || null;
-      return createDesktopShortcut(browser?.name || browserId, exe, folderName, displayName);
+      if (process.platform === "win32" && exe) {
+        try {
+          const safeName = `${browser?.name || browserId} - ${displayName}`.replace(
+            /[<>:"/\\|?*]/g,
+            ""
+          );
+          const shortcutPath = import_node_path6.default.join(
+            import_node_os3.default.homedir(),
+            "Desktop",
+            `${safeName}.lnk`
+          );
+          const written = import_electron.shell.writeShortcutLink(shortcutPath, {
+            target: exe,
+            args: `--profile-directory="${folderName}"`,
+            description: `Launch ${browser?.name || browserId} (${displayName})`,
+            icon: exe,
+            iconIndex: 0
+          });
+          if (written) {
+            return {
+              success: true,
+              shortcutPath,
+              targetExe: exe,
+              arguments: `--profile-directory="${folderName}"`,
+              message: `Created desktop shortcut: ${safeName}.lnk`,
+              isSimulated: false
+            };
+          }
+        } catch {
+        }
+      }
+      return createDesktopShortcut(
+        browser?.name || browserId,
+        exe,
+        folderName,
+        displayName
+      );
+    }
+  );
+  import_electron.ipcMain.handle(
+    "create-sandbox-profile",
+    (_event, {
+      browserId,
+      profileName,
+      email
+    }) => {
+      const browserDef = SUPPORTED_BROWSERS.find((b) => b.id === browserId);
+      if (!browserDef) {
+        return { ok: false, message: "Invalid browser ID" };
+      }
+      const localStatePath = import_node_path6.default.join(
+        SAFE_SANDBOX_DIR,
+        ...browserDef.localStateSubpath.split("/")
+      );
+      if (!localStatePath.startsWith(SAFE_SANDBOX_DIR)) {
+        return { ok: false, message: "Safety block: outside sandbox" };
+      }
+      import_node_fs5.default.mkdirSync(import_node_path6.default.dirname(localStatePath), { recursive: true });
+      let stateObj = { profile: { info_cache: {} } };
+      if (import_node_fs5.default.existsSync(localStatePath)) {
+        try {
+          stateObj = JSON.parse(
+            import_node_fs5.default.readFileSync(localStatePath, "utf8")
+          );
+        } catch {
+          stateObj = { profile: { info_cache: {} } };
+        }
+      }
+      if (!stateObj.profile) stateObj.profile = {};
+      if (!stateObj.profile.info_cache) stateObj.profile.info_cache = {};
+      const existingKeys = Object.keys(stateObj.profile.info_cache);
+      let nextNum = 1;
+      while (existingKeys.includes(`Profile ${nextNum}`)) {
+        nextNum++;
+      }
+      const folderName = existingKeys.length === 0 ? "Default" : `Profile ${nextNum}`;
+      stateObj.profile.info_cache[folderName] = {
+        name: profileName.trim() || `Test Profile ${nextNum}`,
+        user_name: email?.trim() || `test${nextNum}@example.com`,
+        active_time: Date.now() / 1e3
+      };
+      import_node_fs5.default.writeFileSync(
+        localStatePath,
+        JSON.stringify(stateObj, null, 2),
+        "utf8"
+      );
+      return {
+        ok: true,
+        message: `Created test profile "${profileName}" (${folderName}) in temporary sandbox.`
+      };
+    }
+  );
+  import_electron.ipcMain.handle(
+    "delete-sandbox-profile",
+    (_event, { browserId, folderName }) => {
+      const browserDef = SUPPORTED_BROWSERS.find((b) => b.id === browserId);
+      if (!browserDef) return { ok: false, message: "Invalid browser ID" };
+      const localStatePath = import_node_path6.default.join(
+        SAFE_SANDBOX_DIR,
+        ...browserDef.localStateSubpath.split("/")
+      );
+      if (!localStatePath.startsWith(SAFE_SANDBOX_DIR) || !import_node_fs5.default.existsSync(localStatePath)) {
+        return { ok: false, message: "Sandbox file not found" };
+      }
+      try {
+        const stateObj = JSON.parse(
+          import_node_fs5.default.readFileSync(localStatePath, "utf8")
+        );
+        if (stateObj.profile?.info_cache?.[folderName]) {
+          delete stateObj.profile.info_cache[folderName];
+          import_node_fs5.default.writeFileSync(
+            localStatePath,
+            JSON.stringify(stateObj, null, 2),
+            "utf8"
+          );
+        }
+        return {
+          ok: true,
+          message: `Removed "${folderName}" from temporary sandbox.`
+        };
+      } catch {
+        return { ok: false, message: "Could not update sandbox file" };
+      }
     }
   );
   import_electron.ipcMain.handle("hide-window", () => {
@@ -858,8 +1027,8 @@ import_electron.app.on("second-instance", () => {
 });
 import_electron.app.whenReady().then(() => {
   setupIpc();
-  createWindow();
   createTray();
+  createWindow();
   watcher = new LocalStateWatcher(
     {},
     (detection, eventLog) => {

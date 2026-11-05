@@ -14,7 +14,9 @@ declare global {
         detection: DetectionResult;
         settings: AppSettings;
       }>;
-      onProfilesUpdated: (callback: (data: { detection: DetectionResult }) => void) => () => void;
+      onProfilesUpdated: (
+        callback: (data: { detection: DetectionResult }) => void
+      ) => () => void;
       launchProfile: (
         browserId: BrowserId,
         folderName: string,
@@ -25,13 +27,24 @@ declare global {
         folderName: string,
         customization: Partial<ProfileCustomization>
       ) => Promise<AppSettings>;
-      updateGeneralSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>;
+      updateGeneralSettings: (
+        settings: Partial<AppSettings>
+      ) => Promise<AppSettings>;
       toggleStartup: (enable: boolean) => Promise<boolean>;
       createShortcut: (
         browserId: BrowserId,
         folderName: string,
         displayName: string
       ) => Promise<{ success: boolean; message: string }>;
+      createSandboxProfile: (
+        browserId: BrowserId,
+        profileName: string,
+        email?: string
+      ) => Promise<{ ok: boolean; message: string }>;
+      deleteSandboxProfile: (
+        browserId: BrowserId,
+        folderName: string
+      ) => Promise<{ ok: boolean; message: string }>;
       hideWindow: () => Promise<void>;
       quitApp: () => Promise<void>;
     };
@@ -176,6 +189,14 @@ export async function createSandboxTestProfile(
   profileName: string,
   email: string
 ): Promise<{ ok: boolean; message: string }> {
+  if (isElectron && window.electronAPI) {
+    return window.electronAPI.createSandboxProfile(
+      browserId,
+      profileName,
+      email
+    );
+  }
+
   const res = await fetch('/api/disk-simulate/add-profile', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -188,6 +209,10 @@ export async function deleteSandboxTestProfile(
   browserId: BrowserId,
   folderName: string
 ): Promise<{ ok: boolean; message: string }> {
+  if (isElectron && window.electronAPI) {
+    return window.electronAPI.deleteSandboxProfile(browserId, folderName);
+  }
+
   const res = await fetch('/api/disk-simulate/delete-profile', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

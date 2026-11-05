@@ -1,24 +1,26 @@
 {
-  "name": "react-example",
+  "name": "browser-profile-launcher",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Windows desktop launcher that auto-detects and opens browser profiles across Chrome, Brave, Edge, and Vivaldi.",
+  "author": "Browser Profile Launcher",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
     "start": "node start.js",
-    "electron": "electron .",
+    "electron": "npm run build:all && electron .",
     "build": "vite build",
-    "build:electron": "esbuild electron/main.ts --bundle --platform=node --target=node20 --outfile=electron/main.cjs --external:electron",
+    "build:electron": "node electron/assets/create-icon.js && esbuild electron/main.ts --bundle --platform=node --target=node20 --outfile=electron/main.cjs --external:electron",
     "build:all": "npm run build && npm run build:electron",
-    "dist": "npm run build:all && electron-builder --win",
+    "dist": "npm run build:all && electron-builder --win --x64 --publish never",
     "clean": "rm -rf dist dist-electron server.js",
     "lint": "tsc --noEmit",
     "detect": "tsx src/detect/cli.ts",
     "test": "tsx --test src/detect/detect.test.ts"
   },
   "build": {
-    "appId": "com.browserlauncher.app",
+    "appId": "com.browserprofilelauncher.app",
     "productName": "Browser Profile Launcher",
     "asar": true,
     "directories": {
@@ -29,24 +31,24 @@
         {
           "target": "nsis",
           "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
         }
       ],
-      "icon": "electron/assets/app-icon.png"
+      "icon": "electron/assets/app-icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Browser Profile Launcher"
+      "shortcutName": "Browser Profile Launcher",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*",
+      "electron/main.cjs",
+      "electron/preload.cjs",
+      "electron/assets/**/*",
       "package.json"
     ]
   },

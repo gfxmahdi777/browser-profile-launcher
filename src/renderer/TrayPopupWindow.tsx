@@ -24,6 +24,7 @@ interface TrayPopupWindowProps {
   isDark: boolean;
   lang: Language;
   isVisible: boolean;
+  isStandaloneElectron?: boolean;
   lastLaunchBanner: string | null;
   onLaunch: (profile: BrowserProfile, effectiveName: string) => void;
   onUpdateCustomization: (
@@ -33,6 +34,8 @@ interface TrayPopupWindowProps {
   onCreateShortcut: (profile: BrowserProfile, effectiveName: string) => void;
   onDeleteFromDisk: (profile: BrowserProfile) => void;
   onAddCustomGroup: (newGroup: string) => void;
+  onToggleTheme?: () => void;
+  onToggleLanguage?: () => void;
   onClosePopup: () => void;
 }
 
@@ -42,12 +45,15 @@ export function TrayPopupWindow({
   isDark,
   lang,
   isVisible,
+  isStandaloneElectron = false,
   lastLaunchBanner,
   onLaunch,
   onUpdateCustomization,
   onCreateShortcut,
   onDeleteFromDisk,
   onAddCustomGroup,
+  onToggleTheme,
+  onToggleLanguage,
   onClosePopup,
 }: TrayPopupWindowProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +63,7 @@ export function TrayPopupWindow({
 
   const t = TRANSLATIONS[lang];
 
-  if (!isVisible) {
+  if (!isVisible && !isStandaloneElectron) {
     return (
       <div
         className={`w-full max-w-[390px] h-[560px] rounded-2xl border flex flex-col items-center justify-center p-6 text-center transition-all duration-200 ${
@@ -138,7 +144,11 @@ export function TrayPopupWindow({
     <section
       aria-label="Browser Profile Launcher Popup Window"
       data-testid="tray-popup-window"
-      className={`w-full max-w-[390px] h-[560px] rounded-2xl flex flex-col overflow-hidden transition-all duration-200 shadow-2xl border ${
+      className={`${
+        isStandaloneElectron
+          ? 'w-screen h-screen rounded-none border-0'
+          : 'w-full max-w-[390px] h-[560px] rounded-2xl shadow-2xl border'
+      } flex flex-col overflow-hidden transition-all duration-200 ${
         isDark
           ? 'bg-slate-950 border-slate-800/90 text-slate-100 shadow-black/60'
           : 'bg-slate-50 border-slate-200/90 text-slate-900 shadow-slate-300/70'
@@ -159,8 +169,30 @@ export function TrayPopupWindow({
               {t.appTitle}
             </h2>
           </div>
-          <div className="flex items-center gap-2 text-[11px] opacity-70">
+          <div className="flex items-center gap-1.5 text-[11px] opacity-80">
             <span>{totalMatchingProfiles} profiles</span>
+            {onToggleLanguage && (
+              <button
+                type="button"
+                onClick={onToggleLanguage}
+                aria-label="Toggle language"
+                className="px-1.5 py-0.5 rounded hover:bg-slate-500/20 font-medium transition-colors"
+                title="Switch Language (EN / বাংলা)"
+              >
+                {lang === 'en' ? 'বাংলা' : 'EN'}
+              </button>
+            )}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                aria-label="Toggle theme"
+                className="px-1.5 py-0.5 rounded hover:bg-slate-500/20 font-medium transition-colors"
+                title="Switch Light / Dark Mode"
+              >
+                {isDark ? '☀' : '☾'}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClosePopup}

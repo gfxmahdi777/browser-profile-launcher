@@ -175,6 +175,38 @@ export default function App() {
     setTimeout(fetchInitialState, 550);
   };
 
+  if (isElectron) {
+    return (
+      <TrayPopupWindow
+        browsers={detection?.browsers || []}
+        settings={settings}
+        isDark={isDark}
+        lang={lang}
+        isVisible={true}
+        isStandaloneElectron={true}
+        lastLaunchBanner={lastLaunchBanner}
+        onLaunch={handleLaunchProfile}
+        onUpdateCustomization={handleUpdateCustomization}
+        onCreateShortcut={handleCreateShortcut}
+        onDeleteFromDisk={handleDeleteFromDisk}
+        onAddCustomGroup={(newGroup) =>
+          handleUpdateGeneralSettings({
+            customGroups: [...settings.customGroups, newGroup],
+          })
+        }
+        onToggleTheme={() =>
+          handleUpdateGeneralSettings({ theme: isDark ? 'light' : 'dark' })
+        }
+        onToggleLanguage={() =>
+          handleUpdateGeneralSettings({ language: lang === 'en' ? 'bn' : 'en' })
+        }
+        onClosePopup={() => {
+          window.electronAPI?.hideWindow();
+        }}
+      />
+    );
+  }
+
   return (
     <div
       className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
