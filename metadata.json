@@ -1,0 +1,6 @@
+{
+  "name": "Browser Profile Launcher",
+  "description": "Windows launcher that auto-detects and launches profiles across Chrome, Brave, Edge, and Vivaldi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

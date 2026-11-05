@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          if (typeof window !== 'undefined' && 'fetch' in window) {
+            var _fetch = window.fetch.bind(window);
+            Object.defineProperty(window, 'fetch', {
+              configurable: true,
+              enumerable: true,
+              get: function() { return _fetch; },
+              set: function(val) { _fetch = val; }
+            });
+          }
+        } catch (e) {}
+
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && event.filename.indexOf('chrome-extension://') !== -1) ||
+            (event.message && event.message.indexOf('Cannot set property fetch') !== -1)
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+      })();
+    </script>
+    <title>Browser Profile Launcher</title>
+    <meta name="description" content="Windows launcher that auto-detects and launches profiles across Chrome, Brave, Edge, and Vivaldi." />
+    <meta property="og:title" content="Browser Profile Launcher" />
+    <meta property="og:description" content="Windows launcher that auto-detects and launches profiles across Chrome, Brave, Edge, and Vivaldi." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
