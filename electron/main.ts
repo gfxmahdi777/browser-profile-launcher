@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -27,6 +27,9 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let watcher: LocalStateWatcher | null = null;
 
+// Check if launched with --hidden flag (e.g., background auto-start)
+const startHidden = process.argv.includes('--hidden');
+
 // Settings stored in Electron app userData folder (never in browser folders)
 const settingsManager = new SettingsManager(app.getPath('userData'));
 
@@ -51,22 +54,44 @@ function getTrayIconImage() {
   return nativeImage.createEmpty();
 }
 
-function createWindow() {
+function showAndFocusMainWindow() {
+  if (!mainWindow) {
+    createWindow(true);
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  mainWindow.focus();
+}
+
+function createWindow(forceShow = false) {
   const appIconPath = path.join(
     __dirname,
     'assets',
     process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png'
   );
 
+  const shouldShowImmediately = forceShow || !startHidden;
+
   mainWindow = new BrowserWindow({
-    width: 390,
-    height: 560,
-    show: false,
-    frame: false,
-    resizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    alwaysOnTop: true,
+    width: 1050,
+    height: 720,
+    minWidth: 500,
+    minHeight: 450,
+    center: true,
+    show: shouldShowImmediately,
+    frame: true,
+    autoHideMenuBar: true,
+    resizable: true,
+    maximizable: true,
+    minimizable: true,
+    movable: true,
+    fullscreenable: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
     title: 'Browser Profile Launcher',
     icon: fs.existsSync(appIconPath) ? appIconPath : undefined,
@@ -80,6 +105,9 @@ function createWindow() {
     },
   });
 
+  // Remove default application menu bar on Windows for a clean native frame
+  mainWindow.setMenuBarVisibility(false);
+
   // Always load the compiled local HTML file directly in the packaged app or when built
   const distIndex = path.join(__dirname, '../dist/index.html');
   if (app.isPackaged || fs.existsSync(distIndex)) {
@@ -88,7 +116,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:3000');
   }
 
-  // Prevent app from quitting on window close; hide to system tray instead
+  // Prevent app from quitting on window close; hide to system tray instead unless quitting
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -96,64 +124,32 @@ function createWindow() {
     }
   });
 
-  // Fast startup: show window immediately once ready
+  // Ensure window is visible and focused once ready (unless started with --hidden)
   mainWindow.once('ready-to-show', () => {
-    positionWindowNearTray();
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
-
-  // Hide popup if focus is lost (standard Windows tray popup behavior)
-  mainWindow.on('blur', () => {
-    if (!mainWindow?.webContents.isDevToolsOpened()) {
-      mainWindow?.hide();
-    }
-  });
-}
-
-function positionWindowNearTray() {
-  if (!mainWindow) return;
-
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
-  const [windowWidth, windowHeight] = mainWindow.getSize();
-
-  let x = screenWidth - windowWidth - 16;
-  let y = screenHeight - windowHeight - 12;
-
-  if (tray) {
-    const trayBounds = tray.getBounds();
-    if (trayBounds.width > 0 && trayBounds.height > 0) {
-      const candidateX = Math.round(
-        trayBounds.x + trayBounds.width / 2 - windowWidth / 2
-      );
-      const candidateY = Math.round(trayBounds.y - windowHeight - 8);
-      if (
-        candidateX > 0 &&
-        candidateX + windowWidth <= screenWidth &&
-        candidateY > 0
-      ) {
-        x = candidateX;
-        y = candidateY;
+    if (shouldShowImmediately && mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
       }
+      mainWindow.show();
+      mainWindow.focus();
     }
-  }
-
-  mainWindow.setPosition(x, y, false);
+  });
 }
 
 function toggleWindow() {
   if (!mainWindow) {
-    createWindow();
+    createWindow(true);
     return;
   }
 
-  if (mainWindow.isVisible()) {
-    mainWindow.hide();
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    if (mainWindow.isFocused()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.focus();
+    }
   } else {
-    positionWindowNearTray();
-    mainWindow.show();
-    mainWindow.focus();
+    showAndFocusMainWindow();
   }
 }
 
@@ -161,7 +157,7 @@ function createTray() {
   tray = new Tray(getTrayIconImage());
   tray.setToolTip('Browser Profile Launcher');
 
-  // Left click toggles the popup window near tray
+  // Left click toggles/focuses the desktop window
   tray.on('click', () => {
     toggleWindow();
   });
@@ -179,10 +175,7 @@ function updateTrayContextMenu() {
     {
       label: 'Open',
       click: () => {
-        if (!mainWindow) createWindow();
-        positionWindowNearTray();
-        mainWindow?.show();
-        mainWindow?.focus();
+        showAndFocusMainWindow();
       },
     },
     {
@@ -193,6 +186,7 @@ function updateTrayContextMenu() {
         app.setLoginItemSettings({
           openAtLogin: menuItem.checked,
           path: process.execPath,
+          args: ['--hidden'],
         });
         settingsManager.updateGeneralSettings({
           startWithWindows: menuItem.checked,
@@ -223,6 +217,7 @@ function setupIpc() {
     };
   });
 
+  // Launching a profile keeps mainWindow open so users can launch multiple profiles easily
   ipcMain.handle(
     'launch-profile',
     (
@@ -269,6 +264,7 @@ function setupIpc() {
       app.setLoginItemSettings({
         openAtLogin: settings.startWithWindows,
         path: process.execPath,
+        args: ['--hidden'],
       });
       updateTrayContextMenu();
     }
@@ -279,6 +275,7 @@ function setupIpc() {
     app.setLoginItemSettings({
       openAtLogin: enable,
       path: process.execPath,
+      args: ['--hidden'],
     });
     settingsManager.updateGeneralSettings({ startWithWindows: enable });
     updateTrayContextMenu();
@@ -454,12 +451,7 @@ function setupIpc() {
 
 // 3. App Lifecycle
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    positionWindowNearTray();
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  showAndFocusMainWindow();
 });
 
 app.whenReady().then(() => {

@@ -668,6 +668,7 @@ var mainWindow = null;
 var tray = null;
 var isQuitting = false;
 var watcher = null;
+var startHidden = process.argv.includes("--hidden");
 var settingsManager = new SettingsManager(import_electron.app.getPath("userData"));
 var SAFE_SANDBOX_DIR = import_node_path6.default.join(import_electron.app.getPath("temp"), "bpl-sandbox-test");
 function getCachedDetection() {
@@ -686,21 +687,41 @@ function getTrayIconImage() {
   }
   return import_electron.nativeImage.createEmpty();
 }
-function createWindow() {
+function showAndFocusMainWindow() {
+  if (!mainWindow) {
+    createWindow(true);
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  mainWindow.focus();
+}
+function createWindow(forceShow = false) {
   const appIconPath = import_node_path6.default.join(
     __dirname,
     "assets",
     process.platform === "win32" ? "app-icon.ico" : "app-icon.png"
   );
+  const shouldShowImmediately = forceShow || !startHidden;
   mainWindow = new import_electron.BrowserWindow({
-    width: 390,
-    height: 560,
-    show: false,
-    frame: false,
-    resizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    alwaysOnTop: true,
+    width: 1050,
+    height: 720,
+    minWidth: 500,
+    minHeight: 450,
+    center: true,
+    show: shouldShowImmediately,
+    frame: true,
+    autoHideMenuBar: true,
+    resizable: true,
+    maximizable: true,
+    minimizable: true,
+    movable: true,
+    fullscreenable: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
     title: "Browser Profile Launcher",
     icon: import_node_fs5.default.existsSync(appIconPath) ? appIconPath : void 0,
@@ -713,6 +734,7 @@ function createWindow() {
       devTools: !import_electron.app.isPackaged
     }
   });
+  mainWindow.setMenuBarVisibility(false);
   const distIndex = import_node_path6.default.join(__dirname, "../dist/index.html");
   if (import_electron.app.isPackaged || import_node_fs5.default.existsSync(distIndex)) {
     mainWindow.loadFile(distIndex);
@@ -726,49 +748,28 @@ function createWindow() {
     }
   });
   mainWindow.once("ready-to-show", () => {
-    positionWindowNearTray();
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
-  mainWindow.on("blur", () => {
-    if (!mainWindow?.webContents.isDevToolsOpened()) {
-      mainWindow?.hide();
-    }
-  });
-}
-function positionWindowNearTray() {
-  if (!mainWindow) return;
-  const primaryDisplay = import_electron.screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
-  const [windowWidth, windowHeight] = mainWindow.getSize();
-  let x = screenWidth - windowWidth - 16;
-  let y = screenHeight - windowHeight - 12;
-  if (tray) {
-    const trayBounds = tray.getBounds();
-    if (trayBounds.width > 0 && trayBounds.height > 0) {
-      const candidateX = Math.round(
-        trayBounds.x + trayBounds.width / 2 - windowWidth / 2
-      );
-      const candidateY = Math.round(trayBounds.y - windowHeight - 8);
-      if (candidateX > 0 && candidateX + windowWidth <= screenWidth && candidateY > 0) {
-        x = candidateX;
-        y = candidateY;
+    if (shouldShowImmediately && mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
       }
+      mainWindow.show();
+      mainWindow.focus();
     }
-  }
-  mainWindow.setPosition(x, y, false);
+  });
 }
 function toggleWindow() {
   if (!mainWindow) {
-    createWindow();
+    createWindow(true);
     return;
   }
-  if (mainWindow.isVisible()) {
-    mainWindow.hide();
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    if (mainWindow.isFocused()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.focus();
+    }
   } else {
-    positionWindowNearTray();
-    mainWindow.show();
-    mainWindow.focus();
+    showAndFocusMainWindow();
   }
 }
 function createTray() {
@@ -786,10 +787,7 @@ function updateTrayContextMenu() {
     {
       label: "Open",
       click: () => {
-        if (!mainWindow) createWindow();
-        positionWindowNearTray();
-        mainWindow?.show();
-        mainWindow?.focus();
+        showAndFocusMainWindow();
       }
     },
     {
@@ -799,7 +797,8 @@ function updateTrayContextMenu() {
       click: (menuItem) => {
         import_electron.app.setLoginItemSettings({
           openAtLogin: menuItem.checked,
-          path: process.execPath
+          path: process.execPath,
+          args: ["--hidden"]
         });
         settingsManager.updateGeneralSettings({
           startWithWindows: menuItem.checked
@@ -858,7 +857,8 @@ function setupIpc() {
     if (typeof settings.startWithWindows === "boolean") {
       import_electron.app.setLoginItemSettings({
         openAtLogin: settings.startWithWindows,
-        path: process.execPath
+        path: process.execPath,
+        args: ["--hidden"]
       });
       updateTrayContextMenu();
     }
@@ -867,7 +867,8 @@ function setupIpc() {
   import_electron.ipcMain.handle("toggle-startup", (_event, enable) => {
     import_electron.app.setLoginItemSettings({
       openAtLogin: enable,
-      path: process.execPath
+      path: process.execPath,
+      args: ["--hidden"]
     });
     settingsManager.updateGeneralSettings({ startWithWindows: enable });
     updateTrayContextMenu();
@@ -1018,12 +1019,7 @@ function setupIpc() {
   });
 }
 import_electron.app.on("second-instance", () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    positionWindowNearTray();
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  showAndFocusMainWindow();
 });
 import_electron.app.whenReady().then(() => {
   setupIpc();

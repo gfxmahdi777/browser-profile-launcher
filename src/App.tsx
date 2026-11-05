@@ -293,10 +293,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content: Left = 380x560 Tray Popup Launcher, Right = Watcher & Process Verification */}
-      <main className="max-w-7xl w-full mx-auto px-6 py-6 flex-1 flex flex-col lg:flex-row items-start gap-6">
-        {/* Left Column: The 380x560 Popup Launcher Window */}
-        <div className="w-full lg:w-[390px] shrink-0 flex flex-col items-center">
+      {/* Main Content: Responsive Full-Width Desktop Window + Live Watcher & Process Verification */}
+      <main className="max-w-6xl w-full mx-auto px-6 py-6 flex-1 flex flex-col gap-6">
+        {/* Top Section: Full-Width Desktop Launcher Window */}
+        <div className="w-full flex flex-col items-center">
           <TrayPopupWindow
             browsers={detection?.browsers || []}
             settings={settings}
