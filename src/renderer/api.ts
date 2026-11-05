@@ -4,6 +4,7 @@ import {
   BrowserProfile,
   DetectionResult,
   ProfileCustomization,
+  UpdateStatusPayload,
 } from '../shared/types.ts';
 
 declare global {
@@ -17,11 +18,22 @@ declare global {
       onProfilesUpdated: (
         callback: (data: { detection: DetectionResult }) => void
       ) => () => void;
+      onUpdateStatus: (
+        callback: (data: UpdateStatusPayload) => void
+      ) => () => void;
+      checkForUpdates: () => Promise<{ ok: boolean }>;
+      quitAndInstallUpdate: () => Promise<{ ok: boolean }>;
       launchProfile: (
         browserId: BrowserId,
         folderName: string,
-        displayName?: string
-      ) => Promise<{ success: boolean; command: string; message: string }>;
+        displayName?: string,
+        targetUrl?: string
+      ) => Promise<{
+        success: boolean;
+        command: string;
+        message: string;
+        targetUrl?: string;
+      }>;
       updateProfileSettings: (
         browserId: BrowserId,
         folderName: string,
@@ -30,11 +42,18 @@ declare global {
       updateGeneralSettings: (
         settings: Partial<AppSettings>
       ) => Promise<AppSettings>;
+      renameGroup: (
+        oldName: string,
+        newName: string,
+        newIcon?: string
+      ) => Promise<AppSettings>;
+      deleteGroup: (groupName: string) => Promise<AppSettings>;
       toggleStartup: (enable: boolean) => Promise<boolean>;
       createShortcut: (
         browserId: BrowserId,
         folderName: string,
-        displayName: string
+        displayName: string,
+        targetUrl?: string
       ) => Promise<{ success: boolean; message: string }>;
       createSandboxProfile: (
         browserId: BrowserId,
@@ -70,15 +89,43 @@ export async function fetchAppState(): Promise<{
   return res.json();
 }
 
+export function subscribeToUpdateStatus(
+  callback: (status: UpdateStatusPayload) => void
+): () => void {
+  if (isElectron && window.electronAPI?.onUpdateStatus) {
+    return window.electronAPI.onUpdateStatus(callback);
+  }
+  return () => {};
+}
+
+export async function checkForAppUpdates(): Promise<void> {
+  if (isElectron && window.electronAPI?.checkForUpdates) {
+    await window.electronAPI.checkForUpdates();
+  }
+}
+
+export async function installDownloadedUpdate(): Promise<void> {
+  if (isElectron && window.electronAPI?.quitAndInstallUpdate) {
+    await window.electronAPI.quitAndInstallUpdate();
+  }
+}
+
 export async function launchProfile(
   profile: BrowserProfile,
-  displayName: string
-): Promise<{ success: boolean; command: string; message: string }> {
+  displayName: string,
+  targetUrl?: string
+): Promise<{
+  success: boolean;
+  command: string;
+  message: string;
+  targetUrl?: string;
+}> {
   if (isElectron && window.electronAPI) {
     return window.electronAPI.launchProfile(
       profile.browserId,
       profile.folderName,
-      displayName
+      displayName,
+      targetUrl
     );
   }
 
@@ -89,9 +136,11 @@ export async function launchProfile(
       browserId: profile.browserId,
       folderName: profile.folderName,
       displayName,
+      targetUrl,
     }),
   });
-  return res.json();
+  const data = await res.json();
+  return data.result || data;
 }
 
 export async function saveProfileSettings(
@@ -132,15 +181,49 @@ export async function saveGeneralSettings(
   return data.settings;
 }
 
+export async function renameGroupApi(
+  oldName: string,
+  newName: string,
+  newIcon?: string
+): Promise<AppSettings> {
+  if (isElectron && window.electronAPI) {
+    return window.electronAPI.renameGroup(oldName, newName, newIcon);
+  }
+
+  const res = await fetch('/api/settings/group-rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldName, newName, newIcon }),
+  });
+  const data = await res.json();
+  return data.settings;
+}
+
+export async function deleteGroupApi(groupName: string): Promise<AppSettings> {
+  if (isElectron && window.electronAPI) {
+    return window.electronAPI.deleteGroup(groupName);
+  }
+
+  const res = await fetch('/api/settings/group-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ groupName }),
+  });
+  const data = await res.json();
+  return data.settings;
+}
+
 export async function createShortcut(
   profile: BrowserProfile,
-  displayName: string
+  displayName: string,
+  targetUrl?: string
 ): Promise<{ success: boolean; message: string }> {
   if (isElectron && window.electronAPI) {
     return window.electronAPI.createShortcut(
       profile.browserId,
       profile.folderName,
-      displayName
+      displayName,
+      targetUrl
     );
   }
 
@@ -151,6 +234,7 @@ export async function createShortcut(
       browserId: profile.browserId,
       folderName: profile.folderName,
       displayName,
+      targetUrl,
     }),
   });
   const data = await res.json();

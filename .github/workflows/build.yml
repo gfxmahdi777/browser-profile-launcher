@@ -7,6 +7,9 @@ on:
       - main
       - master
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     name: Build Windows NSIS Installer (x64)
@@ -33,5 +36,26 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Browser-Profile-Launcher-Windows-Installer
-          path: dist-electron/*.exe
+          path: |
+            dist-electron/*.exe
+            dist-electron/*.blockmap
+            dist-electron/latest.yml
           if-no-files-found: error
+
+      - name: Publish Windows Installer (.exe) & Auto-Update Metadata to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: Browser Profile Launcher v1.0.0 (Latest Windows Installer)
+          body: |
+            ### Browser Profile Launcher — Windows x64 Installer (.exe)
+            Download **`Browser Profile Launcher-Setup-1.0.0.exe`** below and run it on your Windows PC.
+            Includes `latest.yml` and `.blockmap` metadata for automatic in-app updates via `electron-updater`.
+          draft: false
+          prerelease: false
+          files: |
+            dist-electron/*.exe
+            dist-electron/*.blockmap
+            dist-electron/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

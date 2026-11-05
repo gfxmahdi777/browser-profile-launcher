@@ -13,9 +13,11 @@ import {
   AppSettings,
   BrowserId,
   BrowserProfile,
+  CustomWebShortcut,
   DetectionResult,
   LaunchedInstance,
   ProfileCustomization,
+  UpdateStatusPayload,
   WatcherEventLog,
 } from './shared/types.ts';
 import { DEFAULT_SETTINGS } from './shared/constants.ts';
@@ -28,8 +30,13 @@ import {
   launchProfile,
   saveProfileSettings,
   saveGeneralSettings,
+  renameGroupApi,
+  deleteGroupApi,
   createShortcut,
   subscribeToProfileUpdates,
+  subscribeToUpdateStatus,
+  checkForAppUpdates,
+  installDownloadedUpdate,
   createSandboxTestProfile,
   deleteSandboxTestProfile,
   isElectron,
@@ -39,10 +46,11 @@ export default function App() {
   const [detection, setDetection] = useState<DetectionResult | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [launchedInstances, setLaunchedInstances] = useState<LaunchedInstance[]>([]);
-  const [watcherHistory, setWatcherHistory] = useState<WatcherEventLog[]>([]);
+  const [watcherHistory] = useState<WatcherEventLog[]>([]);
   const [isPopupOpen, setIsPopupOpen] = useState<boolean>(true);
   const [trayMenuOpen, setTrayMenuOpen] = useState<boolean>(false);
   const [lastLaunchBanner, setLastLaunchBanner] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatusPayload | null>(null);
 
   const isDark = settings.theme !== 'light';
   const lang: Language = settings.language || 'en';
@@ -62,12 +70,18 @@ export default function App() {
     fetchInitialState();
 
     // Subscribe to real-time profile updates (IPC in Electron, SSE in web)
-    const unsubscribe = subscribeToProfileUpdates((updatedDetection) => {
+    const unsubscribeProfiles = subscribeToProfileUpdates((updatedDetection) => {
       setDetection(updatedDetection);
     });
 
+    // Subscribe to electron-updater status events
+    const unsubscribeUpdates = subscribeToUpdateStatus((statusPayload) => {
+      setUpdateStatus(statusPayload);
+    });
+
     return () => {
-      unsubscribe();
+      unsubscribeProfiles();
+      unsubscribeUpdates();
     };
   }, [fetchInitialState]);
 
@@ -78,13 +92,14 @@ export default function App() {
     }, 3200);
   };
 
-  // Milestone 2: Click a profile card to launch it in its own detached browser window
+  // Milestone 2: Click a profile card (or custom web shortcut card) to launch it in its own detached browser window
   const handleLaunchProfile = async (
     profile: BrowserProfile,
-    effectiveName: string
+    effectiveName: string,
+    targetUrl?: string
   ) => {
     try {
-      const result = await launchProfile(profile, effectiveName);
+      const result = await launchProfile(profile, effectiveName, targetUrl);
       const newInst: LaunchedInstance = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         browserId: profile.browserId,
@@ -94,31 +109,48 @@ export default function App() {
         command: result.command,
         timestamp: new Date().toISOString(),
         detached: true,
+        targetUrl: result.targetUrl || targetUrl,
       };
       setLaunchedInstances((prev) => [newInst, ...prev.slice(0, 20)]);
-      showBanner(`✓ ${t.launchedToast}: ${profile.browserName} (${effectiveName})`);
+      showBanner(
+        targetUrl
+          ? `✓ ${t.launchedToast}: ${profile.browserName} (${effectiveName}) → ${targetUrl}`
+          : `✓ ${t.launchedToast}: ${profile.browserName} (${effectiveName})`
+      );
     } catch {
       showBanner(`Launched ${profile.browserName} (${effectiveName})`);
     }
   };
 
-  // Update per-profile customization (Nickname, Color, Emoji, Favorite, Group)
+  // Update per-profile customization (Nickname, Color, Emoji, Favorite, Group, Groups, StartupURL)
   const handleUpdateCustomization = async (
     profile: BrowserProfile,
     update: Partial<ProfileCustomization>
   ) => {
     try {
-      const updated = await saveProfileSettings(profile.browserId, profile.folderName, update);
+      const updated = await saveProfileSettings(
+        profile.browserId,
+        profile.folderName,
+        update
+      );
       setSettings(updated);
     } catch {
       // Ignore
     }
   };
 
-  // Update general app settings (Theme, Language, Start with Windows, Custom Groups)
+  // Update general app settings (Theme, Language, Start with Windows, Custom Groups, Group Icons, Custom Shortcuts)
   const handleUpdateGeneralSettings = async (
     partial: Partial<
-      Pick<AppSettings, 'startWithWindows' | 'theme' | 'language' | 'customGroups'>
+      Pick<
+        AppSettings,
+        | 'startWithWindows'
+        | 'theme'
+        | 'language'
+        | 'customGroups'
+        | 'groupIcons'
+        | 'customShortcuts'
+      >
     >
   ) => {
     try {
@@ -129,13 +161,60 @@ export default function App() {
     }
   };
 
+  const handleAddCustomGroup = async (newGroup: string, icon?: string) => {
+    const clean = newGroup.trim();
+    if (!clean) return;
+    const nextGroups = settings.customGroups.includes(clean)
+      ? settings.customGroups
+      : [...settings.customGroups, clean];
+    const nextIcons = {
+      ...(settings.groupIcons || {}),
+      ...(icon ? { [clean]: icon } : {}),
+    };
+    await handleUpdateGeneralSettings({
+      customGroups: nextGroups,
+      groupIcons: nextIcons,
+    });
+  };
+
+  const handleRenameGroup = async (
+    oldName: string,
+    newName: string,
+    newIcon?: string
+  ) => {
+    try {
+      const updated = await renameGroupApi(oldName, newName, newIcon);
+      setSettings(updated);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleDeleteGroup = async (groupName: string) => {
+    try {
+      const updated = await deleteGroupApi(groupName);
+      setSettings(updated);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleReorderGroups = async (newOrder: string[]) => {
+    await handleUpdateGeneralSettings({ customGroups: newOrder });
+  };
+
+  const handleSaveCustomShortcuts = async (shortcuts: CustomWebShortcut[]) => {
+    await handleUpdateGeneralSettings({ customShortcuts: shortcuts });
+  };
+
   // Create Desktop Shortcut (.lnk)
   const handleCreateShortcut = async (
     profile: BrowserProfile,
-    effectiveName: string
+    effectiveName: string,
+    targetUrl?: string
   ) => {
     try {
-      const res = await createShortcut(profile, effectiveName);
+      const res = await createShortcut(profile, effectiveName, targetUrl);
       if (res?.message) {
         showBanner(`✓ ${res.message}`);
       }
@@ -175,6 +254,17 @@ export default function App() {
     setTimeout(fetchInitialState, 550);
   };
 
+  const handleCheckUpdates = async () => {
+    if (isElectron) {
+      await checkForAppUpdates();
+    } else {
+      setUpdateStatus({
+        status: 'up-to-date',
+        version: '1.0.0',
+      });
+    }
+  };
+
   if (isElectron) {
     return (
       <TrayPopupWindow
@@ -185,15 +275,19 @@ export default function App() {
         isVisible={true}
         isStandaloneElectron={true}
         lastLaunchBanner={lastLaunchBanner}
+        updateStatus={updateStatus}
+        onCheckUpdates={handleCheckUpdates}
+        onInstallUpdate={() => installDownloadedUpdate()}
+        onDismissUpdate={() => setUpdateStatus(null)}
         onLaunch={handleLaunchProfile}
         onUpdateCustomization={handleUpdateCustomization}
         onCreateShortcut={handleCreateShortcut}
         onDeleteFromDisk={handleDeleteFromDisk}
-        onAddCustomGroup={(newGroup) =>
-          handleUpdateGeneralSettings({
-            customGroups: [...settings.customGroups, newGroup],
-          })
-        }
+        onAddCustomGroup={handleAddCustomGroup}
+        onRenameGroup={handleRenameGroup}
+        onDeleteGroup={handleDeleteGroup}
+        onReorderGroups={handleReorderGroups}
+        onSaveCustomShortcuts={handleSaveCustomShortcuts}
         onToggleTheme={() =>
           handleUpdateGeneralSettings({ theme: isDark ? 'light' : 'dark' })
         }
@@ -233,7 +327,7 @@ export default function App() {
                   isDark ? 'text-slate-400' : 'text-slate-500'
                 }`}
               >
-                <span>Milestone 1, 2 &amp; 3 Complete</span>
+                <span>Milestone 1, 2, 3 &amp; 4 Complete</span>
                 <span aria-hidden="true">·</span>
                 <span>
                   {detection?.totalProfilesCount ?? 0} profiles across{' '}
@@ -304,20 +398,24 @@ export default function App() {
             lang={lang}
             isVisible={isPopupOpen}
             lastLaunchBanner={lastLaunchBanner}
+            updateStatus={updateStatus}
+            onCheckUpdates={handleCheckUpdates}
+            onInstallUpdate={() => installDownloadedUpdate()}
+            onDismissUpdate={() => setUpdateStatus(null)}
             onLaunch={handleLaunchProfile}
             onUpdateCustomization={handleUpdateCustomization}
             onCreateShortcut={handleCreateShortcut}
             onDeleteFromDisk={handleDeleteFromDisk}
-            onAddCustomGroup={(newGroup) =>
-              handleUpdateGeneralSettings({
-                customGroups: [...settings.customGroups, newGroup],
-              })
-            }
+            onAddCustomGroup={handleAddCustomGroup}
+            onRenameGroup={handleRenameGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onReorderGroups={handleReorderGroups}
+            onSaveCustomShortcuts={handleSaveCustomShortcuts}
             onClosePopup={() => setIsPopupOpen(false)}
           />
         </div>
 
-        {/* Right Column: Live File Watcher Simulator, Launched Windows Log & Acceptance Checks */}
+        {/* Bottom Section: Live File Watcher Simulator, Launched Windows Log & Acceptance Checks */}
         <WatcherAndTestBench
           browsers={detection?.browsers || []}
           watchedFiles={detection?.watchedFiles || []}
@@ -332,7 +430,7 @@ export default function App() {
         />
       </main>
 
-      {/* Bottom Simulated Windows System Tray Bar (Section 9 & 10 of Brief) */}
+      {/* Bottom Simulated Windows System Tray Bar */}
       <footer
         className={`border-t px-6 py-2.5 mt-auto relative transition-colors ${
           isDark
@@ -345,13 +443,12 @@ export default function App() {
             <span>Windows System Tray Bar</span>
             <span aria-hidden="true">·</span>
             <span>
-              Left-click icon to toggle popup · Right-click menu for Start with Windows
+              Left-click icon to toggle window · Right-click menu for Start with Windows
             </span>
           </div>
 
           {/* System Tray Controls */}
           <div className="flex items-center gap-3 relative">
-            {/* Left-click Tray Icon Toggle */}
             <button
               type="button"
               onClick={() => setIsPopupOpen((prev) => !prev)}
@@ -359,7 +456,7 @@ export default function App() {
                 e.preventDefault();
                 setTrayMenuOpen((prev) => !prev);
               }}
-              aria-label="System Tray Icon: Toggle Launcher Popup"
+              aria-label="System Tray Icon: Toggle Launcher Window"
               className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 font-medium transition cursor-pointer ${
                 isPopupOpen
                   ? 'bg-blue-600 text-white border-blue-500'
@@ -369,10 +466,9 @@ export default function App() {
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Tray Icon ({isPopupOpen ? 'Popup Open' : 'Popup Hidden'})</span>
+              <span>Tray Icon ({isPopupOpen ? 'Window Open' : 'Window Hidden'})</span>
             </button>
 
-            {/* Right-click Tray Context Menu Button */}
             <button
               type="button"
               onClick={() => setTrayMenuOpen((prev) => !prev)}
@@ -388,7 +484,6 @@ export default function App() {
               <ChevronUp className="w-3.5 h-3.5" />
             </button>
 
-            {/* Tray Context Menu Popover (Open, Start with Windows, Quit) */}
             {trayMenuOpen && (
               <div
                 className={`absolute bottom-11 right-0 w-56 rounded-xl border p-1.5 shadow-xl z-30 text-xs ${

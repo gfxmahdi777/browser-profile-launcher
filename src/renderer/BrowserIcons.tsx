@@ -1,4 +1,5 @@
 import { BrowserId } from '../shared/types.ts';
+import { DEFAULT_GROUP_ICONS } from '../shared/constants.ts';
 
 interface IconProps {
   browserId: BrowserId;
@@ -62,5 +63,90 @@ export function BrowserLogo({ browserId, className = 'w-4 h-4' }: IconProps) {
           />
         </svg>
       );
+  }
+}
+
+export function TikTokIcon({ className = 'w-3.5 h-3.5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5c-1.42 0-2.6-1.16-2.6-2.6 0-1.72 1.66-3.01 3.37-2.48V9.66c-3.45-.46-6.47 2.22-6.47 5.64 0 3.33 2.76 5.7 5.69 5.7 3.14 0 5.69-2.55 5.69-5.7V9.01a7.35 7.35 0 0 0 4.3 1.38V7.3s-1.88.09-3.24-1.48z"
+        fill="#FE2C55"
+      />
+      <path
+        d="M15.8 5.2A4.28 4.28 0 0 1 14.74 2.4h-2.5v12.4a2.59 2.59 0 0 1-2.59 2.5c-.7 0-1.34-.28-1.8-.73a2.58 2.58 0 0 0 2.4 1.53c1.43 0 2.6-1.12 2.6-2.5V3.2h2.3c.2 1.1.82 2.08 1.65 2.72v2.45a7.34 7.34 0 0 0 3.04.62V6.68s-1.88.09-3.24-1.48z"
+        fill="#25F4EE"
+        fillOpacity="0.85"
+      />
+    </svg>
+  );
+}
+
+export function GroupBadgeIcon({
+  groupName,
+  customIcon,
+  className = 'w-3.5 h-3.5',
+}: {
+  groupName: string;
+  customIcon?: string;
+  className?: string;
+}) {
+  if (groupName.toLowerCase() === 'tiktok' && (!customIcon || customIcon === '🎵')) {
+    return <TikTokIcon className={className} />;
+  }
+  const icon = customIcon || DEFAULT_GROUP_ICONS[groupName];
+  if (icon) {
+    return <span className="leading-none text-xs select-none">{icon}</span>;
+  }
+  return null;
+}
+
+export function getUrlSiteBadgeInfo(rawUrl?: string): {
+  label: string;
+  isTikTok: boolean;
+  isFacebook: boolean;
+  isYouTube: boolean;
+  hostname: string;
+} | null {
+  if (!rawUrl || !rawUrl.trim()) return null;
+  try {
+    const parsed = new URL(rawUrl.trim());
+    const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host.includes('tiktok.com')) {
+      return {
+        label: 'TikTok',
+        isTikTok: true,
+        isFacebook: false,
+        isYouTube: false,
+        hostname: host,
+      };
+    }
+    if (host.includes('facebook.com') || host.includes('fb.com')) {
+      return {
+        label: 'Facebook',
+        isTikTok: false,
+        isFacebook: true,
+        isYouTube: false,
+        hostname: host,
+      };
+    }
+    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+      return {
+        label: 'YouTube',
+        isTikTok: false,
+        isFacebook: false,
+        isYouTube: true,
+        hostname: host,
+      };
+    }
+    return {
+      label: host,
+      isTikTok: false,
+      isFacebook: false,
+      isYouTube: false,
+      hostname: host,
+    };
+  } catch {
+    return null;
   }
 }

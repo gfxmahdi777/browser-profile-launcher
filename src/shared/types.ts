@@ -72,6 +72,20 @@ export interface ProfileCustomization {
   emoji?: string;
   favorite?: boolean;
   group?: string;
+  groups?: string[];
+  startupUrl?: string;
+}
+
+export interface CustomWebShortcut {
+  id: string;
+  name: string;
+  browserId: BrowserId;
+  folderName: string;
+  url: string;
+  color?: string;
+  emoji?: string;
+  favorite?: boolean;
+  groups?: string[];
 }
 
 export interface AppSettings {
@@ -79,7 +93,24 @@ export interface AppSettings {
   theme: 'system' | 'light' | 'dark';
   language: 'en' | 'bn';
   customGroups: string[];
+  groupIcons?: Record<string, string>;
+  customShortcuts?: CustomWebShortcut[];
+  migratedTikTokGroup?: boolean;
   profiles: Record<string, ProfileCustomization>; // Keyed by `${browserId}:${folderName}`
+}
+
+export interface UpdateStatusPayload {
+  status:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'downloaded'
+    | 'up-to-date'
+    | 'error';
+  version?: string;
+  progress?: number;
+  message?: string;
 }
 
 export interface LaunchedInstance {
@@ -91,6 +122,7 @@ export interface LaunchedInstance {
   command: string;
   timestamp: string;
   detached: boolean;
+  targetUrl?: string;
 }
 
 export interface WatcherEventLog {

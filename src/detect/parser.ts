@@ -5,16 +5,23 @@ import {
 } from '../shared/types.ts';
 
 /**
- * Computes 1-2 letter uppercase initials for a profile display name.
+ * Computes 1-2 letter uppercase initials for a profile display name using only letters and numbers.
+ * e.g. "Work & Clients" -> "WC", "John Doe" -> "JD", "Alice" -> "AL"
  */
 export function getInitials(name: string): string {
   if (!name || !name.trim()) return '?';
-  const clean = name.trim();
-  const words = clean.split(/\s+/);
+  const words = name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
   if (words.length >= 2) {
     return (words[0][0] + words[1][0]).toUpperCase();
   }
-  return clean.slice(0, Math.min(2, clean.length)).toUpperCase();
+  if (words.length === 1) {
+    return words[0].slice(0, Math.min(2, words[0].length)).toUpperCase();
+  }
+  return '?';
 }
 
 /**

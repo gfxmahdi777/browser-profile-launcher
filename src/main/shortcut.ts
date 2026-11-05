@@ -1,6 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
+import { validateLaunchUrl } from './launcher.ts';
 
 export interface ShortcutResult {
   success: boolean;
@@ -12,20 +13,24 @@ export interface ShortcutResult {
 }
 
 /**
- * Creates a Windows Desktop shortcut (.lnk) for a specific browser profile.
+ * Creates a Windows Desktop shortcut (.lnk) for a specific browser profile (and optional target URL).
  * Equivalent to Electron's shell.writeShortcutLink with target exe and --profile-directory argument.
  */
 export function createDesktopShortcut(
   browserName: string,
   executablePath: string | null,
   folderName: string,
-  profileDisplayName: string
+  profileDisplayName: string,
+  targetUrl?: string | null
 ): ShortcutResult {
   const safeName = `${browserName} - ${profileDisplayName}`.replace(/[<>:"/\\|?*]/g, '');
   const desktopDir = path.join(os.homedir(), 'Desktop');
   const shortcutPath = path.join(desktopDir, `${safeName}.lnk`);
   const targetExe = executablePath || `${browserName.toLowerCase().replace(/\s+/g, '')}.exe`;
-  const args = `--profile-directory="${folderName}"`;
+  const validUrl = validateLaunchUrl(targetUrl);
+  const args = validUrl
+    ? `--profile-directory="${folderName}" "${validUrl}"`
+    : `--profile-directory="${folderName}"`;
 
   if (process.platform === 'win32' && executablePath) {
     try {

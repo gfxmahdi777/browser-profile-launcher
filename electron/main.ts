@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
+import electronUpdater from 'electron-updater';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -13,7 +14,10 @@ import {
   DetectionResult,
   ProfileCustomization,
   RawLocalState,
+  UpdateStatusPayload,
 } from '../src/shared/types.ts';
+
+const { autoUpdater } = electronUpdater;
 
 // 1. Single Instance Lock (Allow only one running copy of the app)
 const gotTheLock = app.requestSingleInstanceLock();
@@ -35,6 +39,80 @@ const settingsManager = new SettingsManager(app.getPath('userData'));
 
 // Isolated temporary sandbox folder for safe test profile creation
 const SAFE_SANDBOX_DIR = path.join(app.getPath('temp'), 'bpl-sandbox-test');
+
+function sendUpdateStatus(payload: UpdateStatusPayload) {
+  mainWindow?.webContents.send('update-status', payload);
+}
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    sendUpdateStatus({
+      status: 'checking',
+      message: 'Checking for updates...',
+    });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    sendUpdateStatus({
+      status: 'available',
+      version: info?.version,
+      message: `Update v${info?.version || 'new'} found. Downloading...`,
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    sendUpdateStatus({
+      status: 'up-to-date',
+      version: info?.version,
+      message: 'You are running the latest version.',
+    });
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    const pct = Math.round(progressObj?.percent || 0);
+    sendUpdateStatus({
+      status: 'downloading',
+      progress: pct,
+      message: `Downloading update... ${pct}%`,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    sendUpdateStatus({
+      status: 'downloaded',
+      version: info?.version,
+      progress: 100,
+      message: `Update v${info?.version || 'new'} ready to install. Restart now?`,
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    sendUpdateStatus({
+      status: 'error',
+      message: err?.message || 'Could not check for updates.',
+    });
+  });
+}
+
+function triggerUpdateCheck() {
+  if (!app.isPackaged) {
+    sendUpdateStatus({
+      status: 'up-to-date',
+      version: app.getVersion(),
+      message: 'Development build — auto-updates run in packaged .exe.',
+    });
+    return;
+  }
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    sendUpdateStatus({
+      status: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
 
 function getCachedDetection(): DetectionResult {
   const realDetection = detectAllBrowsers();
@@ -124,7 +202,7 @@ function createWindow(forceShow = false) {
     }
   });
 
-  // Ensure window is visible and focused once ready (unless started with --hidden)
+  // Ensure window is visible and focused once ready (unless started with --hidden), then check for updates
   mainWindow.once('ready-to-show', () => {
     if (shouldShowImmediately && mainWindow) {
       if (mainWindow.isMinimized()) {
@@ -132,6 +210,13 @@ function createWindow(forceShow = false) {
       }
       mainWindow.show();
       mainWindow.focus();
+    }
+
+    // Automatically check for updates on GitHub Releases once window is ready
+    if (app.isPackaged) {
+      setTimeout(() => {
+        triggerUpdateCheck();
+      }, 1500);
     }
   });
 }
@@ -162,7 +247,7 @@ function createTray() {
     toggleWindow();
   });
 
-  // Right-click context menu: Open, Start with Windows, Quit
+  // Right-click context menu: Open, Check for Updates, Start with Windows, Quit
   updateTrayContextMenu();
 }
 
@@ -176,6 +261,13 @@ function updateTrayContextMenu() {
       label: 'Open',
       click: () => {
         showAndFocusMainWindow();
+      },
+    },
+    {
+      label: 'Check for Updates',
+      click: () => {
+        showAndFocusMainWindow();
+        triggerUpdateCheck();
       },
     },
     {
@@ -217,6 +309,17 @@ function setupIpc() {
     };
   });
 
+  ipcMain.handle('check-for-updates', () => {
+    triggerUpdateCheck();
+    return { ok: true };
+  });
+
+  ipcMain.handle('quit-and-install-update', () => {
+    isQuitting = true;
+    autoUpdater.quitAndInstall(false, true);
+    return { ok: true };
+  });
+
   // Launching a profile keeps mainWindow open so users can launch multiple profiles easily
   ipcMain.handle(
     'launch-profile',
@@ -226,14 +329,25 @@ function setupIpc() {
         browserId,
         folderName,
         displayName,
-      }: { browserId: BrowserId; folderName: string; displayName?: string }
+        targetUrl,
+      }: {
+        browserId: BrowserId;
+        folderName: string;
+        displayName?: string;
+        targetUrl?: string;
+      }
     ) => {
       const detection = getCachedDetection();
       const browser = detection.browsers.find((b) => b.id === browserId);
       const def = SUPPORTED_BROWSERS.find((b) => b.id === browserId);
       const exe = browser?.executablePath || def?.standardExePaths[0] || null;
 
-      return launchBrowserProfile(exe, folderName, browser?.name || displayName);
+      return launchBrowserProfile(
+        exe,
+        folderName,
+        browser?.name || displayName,
+        targetUrl
+      );
     }
   );
 
@@ -271,6 +385,24 @@ function setupIpc() {
     return settingsManager.updateGeneralSettings(settings);
   });
 
+  ipcMain.handle(
+    'rename-group',
+    (
+      _event,
+      {
+        oldName,
+        newName,
+        newIcon,
+      }: { oldName: string; newName: string; newIcon?: string }
+    ) => {
+      return settingsManager.renameGroup(oldName, newName, newIcon);
+    }
+  );
+
+  ipcMain.handle('delete-group', (_event, { groupName }: { groupName: string }) => {
+    return settingsManager.deleteGroup(groupName);
+  });
+
   ipcMain.handle('toggle-startup', (_event, enable: boolean) => {
     app.setLoginItemSettings({
       openAtLogin: enable,
@@ -290,7 +422,13 @@ function setupIpc() {
         browserId,
         folderName,
         displayName,
-      }: { browserId: BrowserId; folderName: string; displayName: string }
+        targetUrl,
+      }: {
+        browserId: BrowserId;
+        folderName: string;
+        displayName: string;
+        targetUrl?: string;
+      }
     ) => {
       const detection = getCachedDetection();
       const browser = detection.browsers.find((b) => b.id === browserId);
@@ -309,9 +447,16 @@ function setupIpc() {
             'Desktop',
             `${safeName}.lnk`
           );
+          const validUrl =
+            targetUrl && /^https?:\/\//i.test(targetUrl.trim())
+              ? targetUrl.trim()
+              : null;
+          const shortcutArgs = validUrl
+            ? `--profile-directory="${folderName}" "${validUrl}"`
+            : `--profile-directory="${folderName}"`;
           const written = shell.writeShortcutLink(shortcutPath, {
             target: exe,
-            args: `--profile-directory="${folderName}"`,
+            args: shortcutArgs,
             description: `Launch ${browser?.name || browserId} (${displayName})`,
             icon: exe,
             iconIndex: 0,
@@ -321,7 +466,7 @@ function setupIpc() {
               success: true,
               shortcutPath,
               targetExe: exe,
-              arguments: `--profile-directory="${folderName}"`,
+              arguments: shortcutArgs,
               message: `Created desktop shortcut: ${safeName}.lnk`,
               isSimulated: false,
             };
@@ -335,7 +480,8 @@ function setupIpc() {
         browser?.name || browserId,
         exe,
         folderName,
-        displayName
+        displayName,
+        targetUrl
       );
     }
   );
@@ -455,6 +601,7 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
+  setupAutoUpdater();
   setupIpc();
   createTray();
   createWindow();

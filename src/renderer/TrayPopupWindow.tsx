@@ -6,16 +6,37 @@ import {
   X,
   Compass,
   AlertTriangle,
+  Settings2,
+  Globe,
+  RefreshCw,
+  Download,
 } from 'lucide-react';
 import {
   AppSettings,
   BrowserProfile,
+  CustomWebShortcut,
   DetectedBrowser,
   ProfileCustomization,
+  UpdateStatusPayload,
 } from '../shared/types.ts';
-import { getProfileKey } from '../shared/constants.ts';
-import { BrowserLogo } from './BrowserIcons.tsx';
+import {
+  DEFAULT_GROUP_ICONS,
+  getProfileGroups,
+  getProfileKey,
+} from '../shared/constants.ts';
+import {
+  BrowserLogo,
+  GroupBadgeIcon,
+  TikTokIcon,
+} from './BrowserIcons.tsx';
 import { ProfileCard } from './ProfileCard.tsx';
+import {
+  GroupFormModal,
+  ManageGroupsModal,
+  ProfileCustomizeModal,
+  WebShortcutCard,
+  WebShortcutModal,
+} from './CustomizationModals.tsx';
 import { Language, TRANSLATIONS } from './i18n.ts';
 
 interface TrayPopupWindowProps {
@@ -26,14 +47,30 @@ interface TrayPopupWindowProps {
   isVisible: boolean;
   isStandaloneElectron?: boolean;
   lastLaunchBanner: string | null;
-  onLaunch: (profile: BrowserProfile, effectiveName: string) => void;
+  updateStatus?: UpdateStatusPayload | null;
+  onCheckUpdates?: () => void;
+  onInstallUpdate?: () => void;
+  onDismissUpdate?: () => void;
+  onLaunch: (
+    profile: BrowserProfile,
+    effectiveName: string,
+    targetUrl?: string
+  ) => void;
   onUpdateCustomization: (
     profile: BrowserProfile,
     update: Partial<ProfileCustomization>
   ) => void;
-  onCreateShortcut: (profile: BrowserProfile, effectiveName: string) => void;
+  onCreateShortcut: (
+    profile: BrowserProfile,
+    effectiveName: string,
+    targetUrl?: string
+  ) => void;
   onDeleteFromDisk: (profile: BrowserProfile) => void;
-  onAddCustomGroup: (newGroup: string) => void;
+  onAddCustomGroup: (newGroup: string, icon?: string) => void;
+  onRenameGroup?: (oldName: string, newName: string, newIcon?: string) => void;
+  onDeleteGroup?: (groupName: string) => void;
+  onReorderGroups?: (newOrder: string[]) => void;
+  onSaveCustomShortcuts?: (shortcuts: CustomWebShortcut[]) => void;
   onToggleTheme?: () => void;
   onToggleLanguage?: () => void;
   onClosePopup: () => void;
@@ -47,21 +84,46 @@ export function TrayPopupWindow({
   isVisible,
   isStandaloneElectron = false,
   lastLaunchBanner,
+  updateStatus,
+  onCheckUpdates,
+  onInstallUpdate,
+  onDismissUpdate,
   onLaunch,
   onUpdateCustomization,
   onCreateShortcut,
   onDeleteFromDisk,
   onAddCustomGroup,
+  onRenameGroup,
+  onDeleteGroup,
+  onReorderGroups,
+  onSaveCustomShortcuts,
   onToggleTheme,
   onToggleLanguage,
   onClosePopup,
 }: TrayPopupWindowProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
-  const [addingGroup, setAddingGroup] = useState(false);
-  const [newGroupDraft, setNewGroupDraft] = useState('');
+
+  // Modal states
+  const [customizingProfile, setCustomizingProfile] =
+    useState<BrowserProfile | null>(null);
+  const [groupModalState, setGroupModalState] = useState<{
+    open: boolean;
+    mode: 'create' | 'edit';
+    targetGroup?: string;
+  }>({ open: false, mode: 'create' });
+  const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+  const [webShortcutModal, setWebShortcutModal] = useState<{
+    open: boolean;
+    editing?: CustomWebShortcut | null;
+  }>({ open: false, editing: null });
 
   const t = TRANSLATIONS[lang];
+  const groupIcons: Record<string, string> = {
+    ...DEFAULT_GROUP_ICONS,
+    ...(settings.groupIcons || {}),
+  };
+  const customShortcuts: CustomWebShortcut[] = settings.customShortcuts || [];
 
   if (!isVisible && !isStandaloneElectron) {
     return (
@@ -83,14 +145,15 @@ export function TrayPopupWindow({
     );
   }
 
-  // Only show installed browsers (Project Brief Section 7 Step 3: "If neither works, hide that browser's section")
+  // Only show installed browsers
   const installedBrowsers = browsers.filter((b) => b.isInstalled);
 
-  // Filter helper
+  // Filter helper for profiles (supports multi-group assignment)
   const matchesFilter = (profile: BrowserProfile): boolean => {
     const key = getProfileKey(profile.browserId, profile.folderName);
     const custom = settings.profiles[key] || {};
     const effectiveName = custom.nickname || profile.displayName;
+    const assignedGroups = getProfileGroups(custom);
 
     if (selectedFilter === 'favorites' && !custom.favorite) {
       return false;
@@ -98,7 +161,7 @@ export function TrayPopupWindow({
     if (
       selectedFilter !== 'all' &&
       selectedFilter !== 'favorites' &&
-      custom.group !== selectedFilter
+      !assignedGroups.includes(selectedFilter)
     ) {
       return false;
     }
@@ -110,9 +173,35 @@ export function TrayPopupWindow({
       profile.displayName.toLowerCase().includes(q) ||
       profile.folderName.toLowerCase().includes(q) ||
       profile.browserName.toLowerCase().includes(q) ||
-      (custom.group || '').toLowerCase().includes(q)
+      (custom.startupUrl || '').toLowerCase().includes(q) ||
+      assignedGroups.some((g) => g.toLowerCase().includes(q))
     );
   };
+
+  // Filter helper for custom web/TikTok shortcut cards
+  const matchesShortcutFilter = (sc: CustomWebShortcut): boolean => {
+    const scGroups = sc.groups || [];
+    if (selectedFilter === 'favorites' && !sc.favorite) {
+      return false;
+    }
+    if (
+      selectedFilter !== 'all' &&
+      selectedFilter !== 'favorites' &&
+      !scGroups.includes(selectedFilter)
+    ) {
+      return false;
+    }
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      sc.name.toLowerCase().includes(q) ||
+      sc.url.toLowerCase().includes(q) ||
+      sc.folderName.toLowerCase().includes(q) ||
+      scGroups.some((g) => g.toLowerCase().includes(q))
+    );
+  };
+
+  const visibleShortcuts = customShortcuts.filter(matchesShortcutFilter);
 
   // Gather favorite profiles that match search/filter
   const favoriteProfiles: BrowserProfile[] = [];
@@ -130,14 +219,40 @@ export function TrayPopupWindow({
     0
   );
 
-  const handleCreateGroup = () => {
-    const clean = newGroupDraft.trim();
-    if (clean && !settings.customGroups.includes(clean)) {
-      onAddCustomGroup(clean);
-      setSelectedFilter(clean);
-    }
-    setNewGroupDraft('');
-    setAddingGroup(false);
+  const resolveProfileObject = (
+    browserId: BrowserProfile['browserId'],
+    folderName: string,
+    fallbackName: string
+  ): BrowserProfile => {
+    const browser = browsers.find((b) => b.id === browserId);
+    const existing = browser?.profiles.find((p) => p.folderName === folderName);
+    if (existing) return existing;
+    return {
+      browserId,
+      browserName: browser?.name || browserId,
+      folderName,
+      displayName: fallbackName,
+      initials: fallbackName.slice(0, 2).toUpperCase(),
+      avatarPath: null,
+      avatarIcon: null,
+      gaiaId: null,
+      isDefault: folderName === 'Default',
+      launchArgument: `--profile-directory="${folderName}"`,
+    };
+  };
+
+  const handleSaveShortcut = (shortcut: CustomWebShortcut) => {
+    if (!onSaveCustomShortcuts) return;
+    const exists = customShortcuts.some((s) => s.id === shortcut.id);
+    const updated = exists
+      ? customShortcuts.map((s) => (s.id === shortcut.id ? shortcut : s))
+      : [shortcut, ...customShortcuts];
+    onSaveCustomShortcuts(updated);
+  };
+
+  const handleDeleteShortcut = (shortcutId: string) => {
+    if (!onSaveCustomShortcuts) return;
+    onSaveCustomShortcuts(customShortcuts.filter((s) => s.id !== shortcutId));
   };
 
   return (
@@ -163,21 +278,61 @@ export function TrayPopupWindow({
         }`}
       >
         <div className="w-full max-w-6xl mx-auto space-y-3">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
               <h2 className="text-sm font-semibold tracking-tight">
                 {t.appTitle}
               </h2>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-md ${
+                  isDark
+                    ? 'bg-slate-800 text-slate-300'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {totalMatchingProfiles} profiles
+              </span>
             </div>
-            <div className="flex items-center gap-2 text-xs opacity-90">
-              <span className="opacity-75">{totalMatchingProfiles} profiles</span>
+
+            <div className="flex items-center gap-2 text-xs">
+              {/* Quick "+ New Web / TikTok Card" Button */}
+              {onSaveCustomShortcuts && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setWebShortcutModal({ open: true, editing: null })
+                  }
+                  className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <TikTokIcon className="w-3.5 h-3.5" />
+                  <span>+ {t.addWebShortcutBtn}</span>
+                </button>
+              )}
+
+              {onCheckUpdates && (
+                <button
+                  type="button"
+                  onClick={onCheckUpdates}
+                  aria-label={t.checkUpdateBtn}
+                  className={`px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    isDark
+                      ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                      : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                  }`}
+                  title={t.checkUpdateBtn}
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                  <span>{t.checkUpdateBtn}</span>
+                </button>
+              )}
+
               {onToggleLanguage && (
                 <button
                   type="button"
                   onClick={onToggleLanguage}
                   aria-label="Toggle language"
-                  className={`px-2.5 py-1 rounded-lg border font-medium transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 rounded-lg border font-medium transition-colors cursor-pointer ${
                     isDark
                       ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
                       : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
@@ -192,7 +347,7 @@ export function TrayPopupWindow({
                   type="button"
                   onClick={onToggleTheme}
                   aria-label="Toggle theme"
-                  className={`px-2.5 py-1 rounded-lg border font-medium transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1.5 rounded-lg border font-medium transition-colors cursor-pointer ${
                     isDark
                       ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
                       : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
@@ -217,8 +372,8 @@ export function TrayPopupWindow({
           </div>
 
           {/* Search Field & Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="relative flex-1">
+          <div className="flex flex-col md:flex-row md:items-center gap-3">
+            <div className="relative md:w-72 lg:w-80 shrink-0">
               <Search
                 className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none ${
                   isDark ? 'text-slate-500' : 'text-slate-400'
@@ -248,14 +403,14 @@ export function TrayPopupWindow({
               )}
             </div>
 
-            {/* Interactive Segmented Filter Bar (All / Favorites / Custom Groups) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            {/* Interactive Segmented Group Bar (All / Favorites / Facebook / TikTok / Work / Personal / Custom) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 flex-1">
               <button
                 type="button"
                 onClick={() => setSelectedFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-colors cursor-pointer ${
                   selectedFilter === 'all'
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-blue-600 text-white shadow-xs'
                     : isDark
                     ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
@@ -267,77 +422,142 @@ export function TrayPopupWindow({
               <button
                 type="button"
                 onClick={() => setSelectedFilter('favorites')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
                   selectedFilter === 'favorites'
-                    ? 'bg-amber-500 text-slate-950'
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
                     : isDark
                     ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
                 }`}
               >
                 <Star className="w-3.5 h-3.5 fill-current" />
-                {t.filterFavorites}
+                <span>{t.filterFavorites}</span>
               </button>
 
-              {settings.customGroups.map((group) => (
-                <button
-                  key={group}
-                  type="button"
-                  onClick={() => setSelectedFilter(group)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${
-                    selectedFilter === group
-                      ? 'bg-blue-600 text-white'
-                      : isDark
-                      ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
-                  }`}
-                >
-                  {group}
-                </button>
-              ))}
+              {settings.customGroups.map((group) => {
+                const isSelected = selectedFilter === group;
+                return (
+                  <button
+                    key={group}
+                    type="button"
+                    onClick={() => setSelectedFilter(group)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setGroupModalState({
+                        open: true,
+                        mode: 'edit',
+                        targetGroup: group,
+                      });
+                    }}
+                    title={t.editGroupTooltip}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : isDark
+                        ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                        : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/70'
+                    }`}
+                  >
+                    <GroupBadgeIcon
+                      groupName={group}
+                      customIcon={groupIcons[group]}
+                      className="w-3.5 h-3.5"
+                    />
+                    <span>{group}</span>
+                  </button>
+                );
+              })}
 
+              {/* "+" Button: Opens Create Custom Group Modal */}
               <button
                 type="button"
-                onClick={() => setAddingGroup((prev) => !prev)}
+                onClick={() =>
+                  setGroupModalState({ open: true, mode: 'create' })
+                }
                 aria-label="Add custom group"
-                className={`p-1.5 rounded-lg text-xs shrink-0 transition-colors cursor-pointer ${
+                className={`p-1.5 rounded-xl text-xs shrink-0 border transition-colors cursor-pointer ${
                   isDark
-                    ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                    ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+                    : 'border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
                 }`}
                 title={t.addGroup}
               >
                 <Plus className="w-4 h-4" />
               </button>
-            </div>
-          </div>
 
-          {/* Inline Add Group Form */}
-          {addingGroup && (
-            <div className="flex items-center gap-2 pt-1 max-w-md">
-              <input
-                type="text"
-                value={newGroupDraft}
-                onChange={(e) => setNewGroupDraft(e.target.value)}
-                placeholder={t.newGroupPlaceholder}
-                aria-label={t.newGroupPlaceholder}
-                className={`flex-1 px-3 py-1.5 rounded-lg text-xs border focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                  isDark
-                    ? 'bg-slate-950 border-slate-700 text-white'
-                    : 'bg-white border-slate-300 text-slate-900'
-                }`}
-              />
+              {/* Manage / Edit / Reorder / Delete Groups Button */}
               <button
                 type="button"
-                onClick={handleCreateGroup}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium cursor-pointer"
+                onClick={() => setManageGroupsOpen(true)}
+                aria-label={t.manageGroupsBtn}
+                className={`p-1.5 rounded-xl text-xs shrink-0 border transition-colors cursor-pointer ${
+                  isDark
+                    ? 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                    : 'border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                }`}
+                title={t.manageGroupsModalTitle}
               >
-                {t.addGroup}
+                <Settings2 className="w-4 h-4" />
               </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
+
+      {/* Built-in Auto-Updater Notification Banner */}
+      {updateStatus && updateStatus.status !== 'idle' && (
+        <div
+          className={`px-6 py-2.5 text-xs font-medium shrink-0 border-b ${
+            updateStatus.status === 'downloaded'
+              ? 'bg-blue-600 text-white border-blue-500'
+              : updateStatus.status === 'error'
+              ? 'bg-amber-600 text-white border-amber-500'
+              : isDark
+              ? 'bg-slate-900 text-slate-200 border-slate-800'
+              : 'bg-blue-50 text-blue-900 border-blue-200'
+          }`}
+        >
+          <div className="w-full max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Download className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {updateStatus.status === 'checking'
+                  ? t.updateChecking
+                  : updateStatus.status === 'downloading'
+                  ? `${t.updateDownloading} (${updateStatus.progress ?? 0}%)`
+                  : updateStatus.status === 'downloaded'
+                  ? t.updateReadyPrompt
+                  : updateStatus.status === 'up-to-date'
+                  ? `${t.upToDateMsg}${
+                      updateStatus.version ? ` (v${updateStatus.version})` : ''
+                    }`
+                  : updateStatus.message}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {updateStatus.status === 'downloaded' && onInstallUpdate && (
+                <button
+                  type="button"
+                  onClick={onInstallUpdate}
+                  className="px-3 py-1 rounded-lg bg-white text-blue-700 hover:bg-blue-50 font-semibold transition cursor-pointer shadow-xs"
+                >
+                  {t.restartAndInstallBtn}
+                </button>
+              )}
+              {onDismissUpdate && (
+                <button
+                  type="button"
+                  onClick={onDismissUpdate}
+                  aria-label="Dismiss update notification"
+                  className="p-1 rounded hover:bg-black/15 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Feedback Banner on Profile Launch */}
       {lastLaunchBanner && (
@@ -348,18 +568,20 @@ export function TrayPopupWindow({
         </div>
       )}
 
-      {/* Scrollable Profile List Grouped by Favorites & Browser Headings */}
+      {/* Scrollable Profile List Grouped by Quick Web Shortcuts, Favorites & Browser Headings */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="w-full max-w-6xl mx-auto space-y-6">
           {/* Empty State */}
-          {totalMatchingProfiles === 0 && (
+          {totalMatchingProfiles === 0 && visibleShortcuts.length === 0 && (
             <div className="min-h-[300px] flex flex-col items-center justify-center text-center py-12 px-4">
               <Compass
                 className={`w-10 h-10 mb-3 ${
                   isDark ? 'text-slate-600' : 'text-slate-400'
                 }`}
               />
-              <h3 className="text-sm font-semibold mb-1">{t.noProfilesFound}</h3>
+              <h3 className="text-sm font-semibold mb-1">
+                {t.noProfilesFound}
+              </h3>
               <p
                 className={`text-xs leading-relaxed max-w-md ${
                   isDark ? 'text-slate-400' : 'text-slate-500'
@@ -367,6 +589,56 @@ export function TrayPopupWindow({
               >
                 {t.noProfilesSub}
               </p>
+            </div>
+          )}
+
+          {/* Custom Web / TikTok Shortcut Cards Section */}
+          {visibleShortcuts.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-rose-400">
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>{t.quickShortcutsHeading}</span>
+                </div>
+                <span
+                  className={`text-xs ${
+                    isDark ? 'text-slate-500' : 'text-slate-400'
+                  }`}
+                >
+                  {visibleShortcuts.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {visibleShortcuts.map((sc) => (
+                  <WebShortcutCard
+                    key={sc.id}
+                    shortcut={sc}
+                    browsers={installedBrowsers}
+                    isDark={isDark}
+                    lang={lang}
+                    onLaunchShortcut={(item) => {
+                      const prof = resolveProfileObject(
+                        item.browserId,
+                        item.folderName,
+                        item.name
+                      );
+                      onLaunch(prof, item.name, item.url);
+                    }}
+                    onEditShortcut={(item) =>
+                      setWebShortcutModal({ open: true, editing: item })
+                    }
+                    onDeleteShortcut={handleDeleteShortcut}
+                    onCreateDesktopShortcut={(item) => {
+                      const prof = resolveProfileObject(
+                        item.browserId,
+                        item.folderName,
+                        item.name
+                      );
+                      onCreateShortcut(prof, item.name, item.url);
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
@@ -396,11 +668,12 @@ export function TrayPopupWindow({
                         key={`fav-${key}`}
                         profile={prof}
                         customization={settings.profiles[key] || {}}
-                        customGroups={settings.customGroups}
+                        groupIcons={groupIcons}
                         isDark={isDark}
                         lang={lang}
                         onLaunch={onLaunch}
                         onUpdateCustomization={onUpdateCustomization}
+                        onOpenCustomizeModal={(p) => setCustomizingProfile(p)}
                         onCreateShortcut={onCreateShortcut}
                         onDeleteFromDisk={onDeleteFromDisk}
                       />
@@ -440,7 +713,7 @@ export function TrayPopupWindow({
                   </span>
                 </div>
 
-                {/* Safe error alert if Local State is malformed/locked (Acceptance Check #5) */}
+                {/* Safe error alert if Local State is malformed/locked */}
                 {browser.error && (
                   <div
                     className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
@@ -468,11 +741,12 @@ export function TrayPopupWindow({
                         key={key}
                         profile={prof}
                         customization={settings.profiles[key] || {}}
-                        customGroups={settings.customGroups}
+                        groupIcons={groupIcons}
                         isDark={isDark}
                         lang={lang}
                         onLaunch={onLaunch}
                         onUpdateCustomization={onUpdateCustomization}
+                        onOpenCustomizeModal={(p) => setCustomizingProfile(p)}
                         onCreateShortcut={onCreateShortcut}
                         onDeleteFromDisk={onDeleteFromDisk}
                       />
@@ -484,6 +758,116 @@ export function TrayPopupWindow({
           })}
         </div>
       </div>
+
+      {/* Modal 1: Rich Profile Customization Modal */}
+      {customizingProfile && (
+        <ProfileCustomizeModal
+          profile={customizingProfile}
+          customization={
+            settings.profiles[
+              getProfileKey(
+                customizingProfile.browserId,
+                customizingProfile.folderName
+              )
+            ] || {}
+          }
+          customGroups={settings.customGroups}
+          groupIcons={groupIcons}
+          isDark={isDark}
+          lang={lang}
+          onSave={onUpdateCustomization}
+          onCreateShortcut={onCreateShortcut}
+          onClose={() => setCustomizingProfile(null)}
+        />
+      )}
+
+      {/* Modal 2: Create / Edit Group Modal */}
+      {groupModalState.open && (
+        <GroupFormModal
+          mode={groupModalState.mode}
+          initialName={
+            groupModalState.mode === 'edit'
+              ? groupModalState.targetGroup || ''
+              : ''
+          }
+          initialIcon={
+            groupModalState.mode === 'edit' && groupModalState.targetGroup
+              ? groupIcons[groupModalState.targetGroup] || '🎵'
+              : '🎵'
+          }
+          isDark={isDark}
+          lang={lang}
+          onSubmit={(name, icon) => {
+            if (groupModalState.mode === 'create') {
+              onAddCustomGroup(name, icon);
+              setSelectedFilter(name);
+            } else if (groupModalState.targetGroup && onRenameGroup) {
+              onRenameGroup(groupModalState.targetGroup, name, icon);
+              if (selectedFilter === groupModalState.targetGroup) {
+                setSelectedFilter(name);
+              }
+            }
+          }}
+          onDelete={
+            groupModalState.mode === 'edit' &&
+            groupModalState.targetGroup &&
+            onDeleteGroup
+              ? () => {
+                  const target = groupModalState.targetGroup!;
+                  onDeleteGroup(target);
+                  if (selectedFilter === target) {
+                    setSelectedFilter('all');
+                  }
+                }
+              : undefined
+          }
+          onClose={() => setGroupModalState({ open: false, mode: 'create' })}
+        />
+      )}
+
+      {/* Modal 3: Manage & Reorder Groups Modal */}
+      {manageGroupsOpen && (
+        <ManageGroupsModal
+          customGroups={settings.customGroups}
+          groupIcons={groupIcons}
+          isDark={isDark}
+          lang={lang}
+          onReorderGroups={(newOrder) => {
+            onReorderGroups?.(newOrder);
+          }}
+          onEditGroup={(grp) =>
+            setGroupModalState({
+              open: true,
+              mode: 'edit',
+              targetGroup: grp,
+            })
+          }
+          onDeleteGroup={(grp) => {
+            onDeleteGroup?.(grp);
+            if (selectedFilter === grp) {
+              setSelectedFilter('all');
+            }
+          }}
+          onOpenCreateGroup={() =>
+            setGroupModalState({ open: true, mode: 'create' })
+          }
+          onClose={() => setManageGroupsOpen(false)}
+        />
+      )}
+
+      {/* Modal 4: Create / Edit Custom Web / TikTok Shortcut Card */}
+      {webShortcutModal.open && (
+        <WebShortcutModal
+          browsers={installedBrowsers}
+          customGroups={settings.customGroups}
+          groupIcons={groupIcons}
+          initialShortcut={webShortcutModal.editing}
+          isDark={isDark}
+          lang={lang}
+          onSave={handleSaveShortcut}
+          onClose={() => setWebShortcutModal({ open: false, editing: null })}
+        />
+      )}
     </section>
   );
 }

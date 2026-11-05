@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   MoreHorizontal,
   Star,
@@ -7,64 +7,64 @@ import {
   Tag,
   ExternalLink,
   Trash2,
-  Check,
-  X,
+  Globe,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   BrowserProfile,
   ProfileCustomization,
 } from '../shared/types.ts';
-import { SUPPORTED_BROWSERS } from '../shared/constants.ts';
-import { BrowserLogo } from './BrowserIcons.tsx';
+import {
+  SUPPORTED_BROWSERS,
+  getProfileGroups,
+} from '../shared/constants.ts';
+import {
+  BrowserLogo,
+  GroupBadgeIcon,
+  TikTokIcon,
+  getUrlSiteBadgeInfo,
+} from './BrowserIcons.tsx';
 import { Language, TRANSLATIONS } from './i18n.ts';
-
-const PRESET_COLORS = [
-  '#3B82F6', // Blue
-  '#FB542B', // Brave Orange
-  '#10B981', // Emerald
-  '#F59E0B', // Amber
-  '#EC4899', // Pink
-  '#8B5CF6', // Violet
-  '#06B6D4', // Cyan
-  '#EF4444', // Red
-];
-
-const PRESET_EMOJIS = ['', '📘', '💼', '🚀', '🦁', '🛒', '🎯', '🔒'];
 
 interface ProfileCardProps {
   profile: BrowserProfile;
   customization: ProfileCustomization;
-  customGroups: string[];
+  groupIcons?: Record<string, string>;
   isDark: boolean;
   lang: Language;
-  onLaunch: (profile: BrowserProfile, effectiveName: string) => void;
+  onLaunch: (
+    profile: BrowserProfile,
+    effectiveName: string,
+    targetUrl?: string
+  ) => void;
   onUpdateCustomization: (
     profile: BrowserProfile,
     update: Partial<ProfileCustomization>
   ) => void;
-  onCreateShortcut: (profile: BrowserProfile, effectiveName: string) => void;
+  onOpenCustomizeModal: (profile: BrowserProfile) => void;
+  onCreateShortcut: (
+    profile: BrowserProfile,
+    effectiveName: string,
+    targetUrl?: string
+  ) => void;
   onDeleteFromDisk: (profile: BrowserProfile) => void;
 }
 
 export function ProfileCard({
   profile,
   customization,
-  customGroups,
+  groupIcons = {},
   isDark,
   lang,
   onLaunch,
   onUpdateCustomization,
+  onOpenCustomizeModal,
   onCreateShortcut,
   onDeleteFromDisk,
 }: ProfileCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [activeSubpanel, setActiveSubpanel] = useState<
-    'none' | 'rename' | 'color' | 'group'
-  >('none');
-  const [nicknameDraft, setNicknameDraft] = useState(
-    customization.nickname || profile.displayName
-  );
   const [justLaunched, setJustLaunched] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const t = TRANSLATIONS[lang];
   const browserDef =
@@ -74,20 +74,24 @@ export function ProfileCard({
   const effectiveName = customization.nickname?.trim() || profile.displayName;
   const avatarColor = customization.color || browserDef.brandColor;
   const isFavorite = Boolean(customization.favorite);
+  const assignedGroups = getProfileGroups(customization);
+  const urlBadge = getUrlSiteBadgeInfo(customization.startupUrl);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
 
   const handleCardClick = () => {
     setJustLaunched(true);
-    onLaunch(profile, effectiveName);
+    onLaunch(profile, effectiveName, customization.startupUrl);
     setTimeout(() => setJustLaunched(false), 600);
-  };
-
-  const handleSaveNickname = () => {
-    const trimmed = nicknameDraft.trim();
-    onUpdateCustomization(profile, {
-      nickname: trimmed === profile.displayName ? '' : trimmed,
-    });
-    setActiveSubpanel('none');
-    setMenuOpen(false);
   };
 
   return (
@@ -98,7 +102,7 @@ export function ProfileCard({
           : 'bg-white hover:bg-slate-50 border border-slate-200/90 hover:border-slate-300 shadow-xs'
       } ${justLaunched ? 'ring-2 ring-blue-500 scale-[0.99]' : ''}`}
     >
-      <div className="flex items-center justify-between px-3 py-2.5 gap-2.5">
+      <div className="flex items-center justify-between px-3.5 py-3 gap-2.5">
         {/* Main Clickable Launch Area */}
         <button
           type="button"
@@ -117,7 +121,9 @@ export function ProfileCard({
               }}
             >
               {customization.emoji ? (
-                <span className="text-base leading-none">{customization.emoji}</span>
+                <span className="text-base leading-none">
+                  {customization.emoji}
+                </span>
               ) : (
                 <span>{profile.initials}</span>
               )}
@@ -125,19 +131,24 @@ export function ProfileCard({
             {/* Small Browser Logo Badge */}
             <div
               className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center p-0.5 ${
-                isDark ? 'bg-slate-900 ring-1 ring-slate-700' : 'bg-white ring-1 ring-slate-200'
+                isDark
+                  ? 'bg-slate-900 ring-1 ring-slate-700'
+                  : 'bg-white ring-1 ring-slate-200'
               }`}
               title={profile.browserName}
             >
-              <BrowserLogo browserId={profile.browserId} className="w-3.5 h-3.5" />
+              <BrowserLogo
+                browserId={profile.browserId}
+                className="w-3.5 h-3.5"
+              />
             </div>
           </div>
 
-          {/* Profile Title & Clean Unboxed Metadata */}
+          {/* Profile Title, Startup URL Badge & Group Metadata */}
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span
-                className={`text-sm font-medium truncate ${
+                className={`text-sm font-semibold truncate ${
                   isDark ? 'text-slate-100' : 'text-slate-900'
                 }`}
               >
@@ -149,9 +160,35 @@ export function ProfileCard({
                   aria-label="Pinned favorite"
                 />
               )}
+              {/* Startup URL Badge (TikTok, Facebook, YouTube, or Custom Web) */}
+              {urlBadge && (
+                <span
+                  title={`Opens directly into ${customization.startupUrl}`}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border shrink-0 ${
+                    urlBadge.isTikTok
+                      ? isDark
+                        ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                        : 'bg-rose-50 border-rose-200 text-rose-700'
+                      : urlBadge.isFacebook
+                      ? isDark
+                        ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                        : 'bg-blue-50 border-blue-200 text-blue-700'
+                      : isDark
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                  }`}
+                >
+                  {urlBadge.isTikTok ? (
+                    <TikTokIcon className="w-3 h-3" />
+                  ) : (
+                    <Globe className="w-2.5 h-2.5" />
+                  )}
+                  <span className="max-w-[95px] truncate">{urlBadge.label}</span>
+                </span>
+              )}
             </div>
 
-            {/* Clean unboxed metadata with typographic separator (Zero-Pill Discipline) */}
+            {/* Clean metadata + multi-group tags */}
             <div
               className={`flex items-center gap-1.5 text-[11px] truncate mt-0.5 ${
                 isDark ? 'text-slate-400' : 'text-slate-500'
@@ -165,15 +202,22 @@ export function ProfileCard({
                     <span className="truncate">{profile.displayName}</span>
                   </>
                 )}
-              {customization.group && (
+              {assignedGroups.length > 0 && (
                 <>
                   <span aria-hidden="true">·</span>
                   <span
-                    className={
-                      isDark ? 'text-blue-400 font-medium' : 'text-blue-600 font-medium'
-                    }
+                    className={`inline-flex items-center gap-1 truncate font-medium ${
+                      isDark ? 'text-blue-400' : 'text-blue-600'
+                    }`}
                   >
-                    {customization.group}
+                    <GroupBadgeIcon
+                      groupName={assignedGroups[0]}
+                      customIcon={groupIcons[assignedGroups[0]]}
+                      className="w-3 h-3"
+                    />
+                    <span>
+                      {assignedGroups.join(', ')}
+                    </span>
                   </span>
                 </>
               )}
@@ -181,56 +225,83 @@ export function ProfileCard({
           </div>
         </button>
 
-        {/* "..." Card Context Menu Trigger */}
-        <div className="relative shrink-0">
+        {/* Action Buttons (`Customize` & `...` Menu Trigger) with strict stopPropagation */}
+        <div className="relative shrink-0 flex items-center gap-1" ref={menuRef}>
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              e.preventDefault();
+              setMenuOpen(false);
+              onOpenCustomizeModal(profile);
+            }}
+            aria-label={`Customize ${effectiveName} (${profile.browserName})`}
+            title={t.menuCustomizeModal}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer opacity-75 group-hover:opacity-100 ${
+              isDark
+                ? 'text-slate-400 hover:text-slate-100 hover:bg-slate-700/70'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/70'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
               setMenuOpen((prev) => !prev);
-              setActiveSubpanel('none');
-              setNicknameDraft(customization.nickname || profile.displayName);
             }}
             aria-label={`More actions for ${effectiveName} (${profile.browserName})`}
             aria-expanded={menuOpen}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-              isDark
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
+              menuOpen
+                ? isDark
+                  ? 'bg-slate-700 text-white'
+                  : 'bg-slate-200 text-slate-900'
+                : isDark
                 ? 'text-slate-400 hover:text-slate-100 hover:bg-slate-700/70'
                 : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/70'
             }`}
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
-        </div>
-      </div>
 
-      {/* Expandable Action Menu / Editor inside Card */}
-      {menuOpen && (
-        <div
-          className={`px-3 pb-3 pt-2 border-t text-xs space-y-2 ${
-            isDark
-              ? 'border-slate-800 bg-slate-950/90 text-slate-200'
-              : 'border-slate-200 bg-slate-50/95 text-slate-700'
-          } rounded-b-xl`}
-        >
-          {activeSubpanel === 'none' && (
-            <div className="grid grid-cols-1 gap-1">
+          {/* Dropdown Menu */}
+          {menuOpen && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className={`absolute right-0 top-9 w-60 rounded-xl border p-1.5 shadow-2xl z-30 text-xs space-y-0.5 ${
+                isDark
+                  ? 'border-slate-700 bg-slate-900 text-slate-100 shadow-black/70'
+                  : 'border-slate-200 bg-white text-slate-800 shadow-slate-300/80'
+              }`}
+            >
               <button
                 type="button"
-                onClick={() => setActiveSubpanel('rename')}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/70'
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onOpenCustomizeModal(profile);
+                }}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left font-medium transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                 }`}
               >
                 <Edit3 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                <span>{t.menuRename}</span>
+                <span>{t.menuCustomizeModal}</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setActiveSubpanel('color')}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/70'
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onOpenCustomizeModal(profile);
+                }}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                 }`}
               >
                 <Palette className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -239,17 +310,55 @@ export function ProfileCard({
 
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onOpenCustomizeModal(profile);
+                }}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                }`}
+              >
+                <Tag className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                <span className="truncate">
+                  {t.menuGroup}
+                  {assignedGroups.length > 0
+                    ? ` (${assignedGroups.join(', ')})`
+                    : ''}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onOpenCustomizeModal(profile);
+                }}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="truncate">{t.menuStartupUrl}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
                   onUpdateCustomization(profile, { favorite: !isFavorite });
                   setMenuOpen(false);
                 }}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/70'
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                 }`}
               >
                 <Star
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    isFavorite ? 'text-amber-400 fill-amber-400' : 'text-amber-400'
+                    isFavorite
+                      ? 'text-amber-400 fill-amber-400'
+                      : 'text-amber-400'
                   }`}
                 />
                 <span>{isFavorite ? t.menuUnfavorite : t.menuFavorite}</span>
@@ -257,39 +366,37 @@ export function ProfileCard({
 
               <button
                 type="button"
-                onClick={() => setActiveSubpanel('group')}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/70'
-                }`}
-              >
-                <Tag className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <span>
-                  {t.menuGroup}{' '}
-                  {customization.group ? `(${customization.group})` : ''}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onCreateShortcut(profile, effectiveName);
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateShortcut(
+                    profile,
+                    effectiveName,
+                    customization.startupUrl
+                  );
                   setMenuOpen(false);
                 }}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200/70'
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
                 }`}
               >
                 <ExternalLink className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <span>{t.menuShortcut}</span>
               </button>
 
+              <div
+                className={`my-1 border-t ${
+                  isDark ? 'border-slate-800' : 'border-slate-200'
+                }`}
+              />
+
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   onDeleteFromDisk(profile);
                   setMenuOpen(false);
                 }}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-rose-400 transition-colors ${
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-rose-400 transition-colors cursor-pointer ${
                   isDark ? 'hover:bg-rose-950/50' : 'hover:bg-rose-50'
                 }`}
               >
@@ -298,159 +405,8 @@ export function ProfileCard({
               </button>
             </div>
           )}
-
-          {/* Subpanel: Rename Nickname */}
-          {activeSubpanel === 'rename' && (
-            <div className="space-y-2 pt-1">
-              <label className="block text-[11px] font-medium opacity-80">
-                {t.menuRename}
-              </label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={nicknameDraft}
-                  onChange={(e) => setNicknameDraft(e.target.value)}
-                  placeholder={t.nicknamePlaceholder}
-                  aria-label="Profile Nickname"
-                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-xs border focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    isDark
-                      ? 'bg-slate-900 border-slate-700 text-white'
-                      : 'bg-white border-slate-300 text-slate-900'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveNickname}
-                  aria-label="Save nickname"
-                  className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-1"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  {t.save}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubpanel('none')}
-                  aria-label="Cancel rename"
-                  className={`p-1.5 rounded-lg ${
-                    isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'
-                  }`}
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Subpanel: Color & Emoji Picker */}
-          {activeSubpanel === 'color' && (
-            <div className="space-y-2.5 pt-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium opacity-80">
-                  {t.menuColorEmoji}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubpanel('none')}
-                  className="text-[11px] underline opacity-75 hover:opacity-100"
-                >
-                  Done
-                </button>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {PRESET_COLORS.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    aria-label={`Select color ${hex}`}
-                    onClick={() => onUpdateCustomization(profile, { color: hex })}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                      avatarColor === hex
-                        ? 'scale-110 border-white shadow-xs'
-                        : 'border-transparent opacity-80 hover:opacity-100'
-                    }`}
-                    style={{ backgroundColor: hex }}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                {PRESET_EMOJIS.map((em) => (
-                  <button
-                    key={em || 'initials'}
-                    type="button"
-                    onClick={() => onUpdateCustomization(profile, { emoji: em })}
-                    className={`px-2 py-1 rounded-md text-xs border transition ${
-                      (customization.emoji || '') === em
-                        ? 'border-blue-500 bg-blue-500/15 font-semibold'
-                        : isDark
-                        ? 'border-slate-800 bg-slate-900 hover:bg-slate-800'
-                        : 'border-slate-200 bg-white hover:bg-slate-100'
-                    }`}
-                  >
-                    {em || profile.initials}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Subpanel: Assign Group */}
-          {activeSubpanel === 'group' && (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium opacity-80">
-                  {t.menuGroup}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubpanel('none')}
-                  className="text-[11px] underline opacity-75 hover:opacity-100"
-                >
-                  {t.cancel}
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdateCustomization(profile, { group: '' });
-                    setActiveSubpanel('none');
-                    setMenuOpen(false);
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-xs border ${
-                    !customization.group
-                      ? 'border-blue-500 bg-blue-500/15 text-blue-400 font-medium'
-                      : isDark
-                      ? 'border-slate-800 hover:bg-slate-800'
-                      : 'border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  None
-                </button>
-                {customGroups.map((grp) => (
-                  <button
-                    key={grp}
-                    type="button"
-                    onClick={() => {
-                      onUpdateCustomization(profile, { group: grp });
-                      setActiveSubpanel('none');
-                      setMenuOpen(false);
-                    }}
-                    className={`px-2.5 py-1 rounded-md text-xs border ${
-                      customization.group === grp
-                        ? 'border-blue-500 bg-blue-500/15 text-blue-400 font-medium'
-                        : isDark
-                        ? 'border-slate-800 hover:bg-slate-800'
-                        : 'border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    {grp}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

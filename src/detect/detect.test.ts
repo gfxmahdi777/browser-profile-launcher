@@ -82,6 +82,8 @@ test('Milestone 1: parseLocalState handles JSON with missing profile or info_cac
 
 test('Milestone 1: getInitials extracts clean 1-2 letter initials', () => {
   assert.equal(getInitials('John Doe'), 'JD');
+  assert.equal(getInitials('Work & Clients'), 'WC');
+  assert.equal(getInitials('Facebook - Shop #1'), 'FS');
   assert.equal(getInitials('Alice'), 'AL');
   assert.equal(getInitials('work profile 2'), 'WP');
   assert.equal(getInitials(''), '?');
@@ -112,7 +114,7 @@ test('Milestone 1: detectAllBrowsers returns valid report even when browsers are
   assert.equal(result.installedBrowsersCount, 0);
 });
 
-test('Milestone 2: launchBrowserProfile formats --profile-directory command accurately', () => {
+test('Milestone 2: launchBrowserProfile formats --profile-directory command and optional target URL accurately', () => {
   const chromeLaunch = launchBrowserProfile(
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'Profile 1',
@@ -125,15 +127,16 @@ test('Milestone 2: launchBrowserProfile formats --profile-directory command accu
   );
   assert.equal(chromeLaunch.folderName, 'Profile 1');
 
-  const braveLaunch = launchBrowserProfile(
-    'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
-    'Default',
-    'Brave Browser'
+  const tiktokLaunch = launchBrowserProfile(
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'Profile 2',
+    'Google Chrome',
+    'https://www.tiktok.com'
   );
-  assert.equal(braveLaunch.success, true);
+  assert.equal(tiktokLaunch.success, true);
   assert.equal(
-    braveLaunch.command,
-    '"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe" --profile-directory="Default"'
+    tiktokLaunch.command,
+    '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --profile-directory="Profile 2" "https://www.tiktok.com/"'
   );
 });
 
@@ -198,23 +201,30 @@ test('Milestone 3: LocalStateWatcher detects newly added and deleted Brave profi
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('SettingsManager stores profile nicknames, colors, favorites, and groups in app userData', () => {
+test('SettingsManager stores profile nicknames, colors, favorites, multi-groups, startupUrl, and group rename/delete', () => {
   const tmpSettingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bpl-settings-test-'));
   const manager = new SettingsManager(tmpSettingsDir);
 
+  assert.ok(manager.getSettings().customGroups.includes('TikTok'));
+
   manager.updateProfileCustomization('chrome', 'Profile 1', {
-    nickname: 'FB Marketing #1',
-    color: '#10b981',
-    emoji: '🚀',
+    nickname: 'TikTok Shop #1',
+    color: '#fe2c55',
+    emoji: '🎵',
     favorite: true,
-    group: 'Facebook',
+    groups: ['TikTok', 'Work'],
+    startupUrl: 'https://www.tiktok.com',
   });
+
+  manager.renameGroup('TikTok', 'TikTok Shop', '🛍️');
 
   const key = getProfileKey('chrome', 'Profile 1');
   const reloaded = new SettingsManager(tmpSettingsDir).getSettings();
-  assert.equal(reloaded.profiles[key].nickname, 'FB Marketing #1');
+  assert.equal(reloaded.profiles[key].nickname, 'TikTok Shop #1');
   assert.equal(reloaded.profiles[key].favorite, true);
-  assert.equal(reloaded.profiles[key].group, 'Facebook');
+  assert.deepEqual(reloaded.profiles[key].groups, ['TikTok Shop', 'Work']);
+  assert.equal(reloaded.profiles[key].startupUrl, 'https://www.tiktok.com');
+  assert.ok(reloaded.customGroups.includes('TikTok Shop'));
 
   fs.rmSync(tmpSettingsDir, { recursive: true, force: true });
 });

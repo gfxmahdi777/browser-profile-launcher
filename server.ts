@@ -253,10 +253,11 @@ async function startServer() {
 
   // Milestone 2: Launch a browser profile via child_process.spawn (detached: true, unref)
   app.post('/api/launch', (req, res) => {
-    const { browserId, folderName, displayName } = req.body as {
+    const { browserId, folderName, displayName, targetUrl } = req.body as {
       browserId: BrowserId;
       folderName: string;
       displayName?: string;
+      targetUrl?: string;
     };
 
     const detection = getEnrichedDetection();
@@ -269,7 +270,7 @@ async function startServer() {
     }
 
     const exePath = browser.executablePath || browserDef.standardExePaths[0];
-    const result = launchBrowserProfile(exePath, folderName, browser.name);
+    const result = launchBrowserProfile(exePath, folderName, browser.name, targetUrl);
 
     const instance: LaunchedInstance = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -280,6 +281,7 @@ async function startServer() {
       command: result.command,
       timestamp: new Date().toISOString(),
       detached: true,
+      targetUrl: result.targetUrl,
     };
 
     launchedInstances.unshift(instance);
@@ -294,13 +296,31 @@ async function startServer() {
     });
   });
 
-  // Update general settings (Start with Windows, theme, language, custom groups)
+  // Update general settings (Start with Windows, theme, language, custom groups, customShortcuts)
   app.post('/api/settings/general', (req, res) => {
     const updated = settingsManager.updateGeneralSettings(req.body);
     res.json({ settings: updated });
   });
 
-  // Update per-profile customization (nickname, color, emoji, favorite, group)
+  // Rename a group and update assigned profiles/shortcuts
+  app.post('/api/settings/group-rename', (req, res) => {
+    const { oldName, newName, newIcon } = req.body as {
+      oldName: string;
+      newName: string;
+      newIcon?: string;
+    };
+    const updated = settingsManager.renameGroup(oldName, newName, newIcon);
+    res.json({ settings: updated });
+  });
+
+  // Delete a group and remove it from assigned profiles/shortcuts
+  app.post('/api/settings/group-delete', (req, res) => {
+    const { groupName } = req.body as { groupName: string };
+    const updated = settingsManager.deleteGroup(groupName);
+    res.json({ settings: updated });
+  });
+
+  // Update per-profile customization (nickname, color, emoji, favorite, group, groups, startupUrl)
   app.post('/api/settings/profile', (req, res) => {
     const { browserId, folderName, customization } = req.body as {
       browserId: BrowserId;
@@ -317,10 +337,11 @@ async function startServer() {
 
   // Create Desktop Shortcut (.lnk)
   app.post('/api/shortcut', (req, res) => {
-    const { browserId, folderName, displayName } = req.body as {
+    const { browserId, folderName, displayName, targetUrl } = req.body as {
       browserId: BrowserId;
       folderName: string;
       displayName: string;
+      targetUrl?: string;
     };
 
     const detection = getEnrichedDetection();
@@ -332,7 +353,8 @@ async function startServer() {
       browser?.name || browserId,
       exePath,
       folderName,
-      displayName
+      displayName,
+      targetUrl
     );
 
     res.json({ shortcutResult });
