@@ -7,7 +7,6 @@ import {
   Compass,
   AlertTriangle,
   Settings2,
-  Globe,
   RefreshCw,
   Download,
 } from 'lucide-react';
@@ -27,15 +26,12 @@ import {
 import {
   BrowserLogo,
   GroupBadgeIcon,
-  TikTokIcon,
 } from './BrowserIcons.tsx';
 import { ProfileCard } from './ProfileCard.tsx';
 import {
   GroupFormModal,
   ManageGroupsModal,
   ProfileCustomizeModal,
-  WebShortcutCard,
-  WebShortcutModal,
 } from './CustomizationModals.tsx';
 import { Language, TRANSLATIONS } from './i18n.ts';
 
@@ -96,7 +92,6 @@ export function TrayPopupWindow({
   onRenameGroup,
   onDeleteGroup,
   onReorderGroups,
-  onSaveCustomShortcuts,
   onToggleTheme,
   onToggleLanguage,
   onClosePopup,
@@ -113,17 +108,12 @@ export function TrayPopupWindow({
     targetGroup?: string;
   }>({ open: false, mode: 'create' });
   const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
-  const [webShortcutModal, setWebShortcutModal] = useState<{
-    open: boolean;
-    editing?: CustomWebShortcut | null;
-  }>({ open: false, editing: null });
 
   const t = TRANSLATIONS[lang];
   const groupIcons: Record<string, string> = {
     ...DEFAULT_GROUP_ICONS,
     ...(settings.groupIcons || {}),
   };
-  const customShortcuts: CustomWebShortcut[] = settings.customShortcuts || [];
 
   if (!isVisible && !isStandaloneElectron) {
     return (
@@ -178,31 +168,6 @@ export function TrayPopupWindow({
     );
   };
 
-  // Filter helper for custom web/TikTok shortcut cards
-  const matchesShortcutFilter = (sc: CustomWebShortcut): boolean => {
-    const scGroups = sc.groups || [];
-    if (selectedFilter === 'favorites' && !sc.favorite) {
-      return false;
-    }
-    if (
-      selectedFilter !== 'all' &&
-      selectedFilter !== 'favorites' &&
-      !scGroups.includes(selectedFilter)
-    ) {
-      return false;
-    }
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase().trim();
-    return (
-      sc.name.toLowerCase().includes(q) ||
-      sc.url.toLowerCase().includes(q) ||
-      sc.folderName.toLowerCase().includes(q) ||
-      scGroups.some((g) => g.toLowerCase().includes(q))
-    );
-  };
-
-  const visibleShortcuts = customShortcuts.filter(matchesShortcutFilter);
-
   // Gather favorite profiles that match search/filter
   const favoriteProfiles: BrowserProfile[] = [];
   for (const b of installedBrowsers) {
@@ -218,42 +183,6 @@ export function TrayPopupWindow({
     (sum, b) => sum + b.profiles.filter(matchesFilter).length,
     0
   );
-
-  const resolveProfileObject = (
-    browserId: BrowserProfile['browserId'],
-    folderName: string,
-    fallbackName: string
-  ): BrowserProfile => {
-    const browser = browsers.find((b) => b.id === browserId);
-    const existing = browser?.profiles.find((p) => p.folderName === folderName);
-    if (existing) return existing;
-    return {
-      browserId,
-      browserName: browser?.name || browserId,
-      folderName,
-      displayName: fallbackName,
-      initials: fallbackName.slice(0, 2).toUpperCase(),
-      avatarPath: null,
-      avatarIcon: null,
-      gaiaId: null,
-      isDefault: folderName === 'Default',
-      launchArgument: `--profile-directory="${folderName}"`,
-    };
-  };
-
-  const handleSaveShortcut = (shortcut: CustomWebShortcut) => {
-    if (!onSaveCustomShortcuts) return;
-    const exists = customShortcuts.some((s) => s.id === shortcut.id);
-    const updated = exists
-      ? customShortcuts.map((s) => (s.id === shortcut.id ? shortcut : s))
-      : [shortcut, ...customShortcuts];
-    onSaveCustomShortcuts(updated);
-  };
-
-  const handleDeleteShortcut = (shortcutId: string) => {
-    if (!onSaveCustomShortcuts) return;
-    onSaveCustomShortcuts(customShortcuts.filter((s) => s.id !== shortcutId));
-  };
 
   return (
     <section
@@ -296,19 +225,6 @@ export function TrayPopupWindow({
             </div>
 
             <div className="flex items-center gap-2 text-xs">
-              {/* Quick "+ New Web / TikTok Card" Button */}
-              {onSaveCustomShortcuts && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setWebShortcutModal({ open: true, editing: null })
-                  }
-                  className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                >
-                  <TikTokIcon className="w-3.5 h-3.5" />
-                  <span>+ {t.addWebShortcutBtn}</span>
-                </button>
-              )}
 
               {onCheckUpdates && (
                 <button
@@ -568,11 +484,11 @@ export function TrayPopupWindow({
         </div>
       )}
 
-      {/* Scrollable Profile List Grouped by Quick Web Shortcuts, Favorites & Browser Headings */}
+      {/* Scrollable Profile List Grouped by Favorites & Browser Headings */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="w-full max-w-6xl mx-auto space-y-6">
           {/* Empty State */}
-          {totalMatchingProfiles === 0 && visibleShortcuts.length === 0 && (
+          {totalMatchingProfiles === 0 && (
             <div className="min-h-[300px] flex flex-col items-center justify-center text-center py-12 px-4">
               <Compass
                 className={`w-10 h-10 mb-3 ${
@@ -589,56 +505,6 @@ export function TrayPopupWindow({
               >
                 {t.noProfilesSub}
               </p>
-            </div>
-          )}
-
-          {/* Custom Web / TikTok Shortcut Cards Section */}
-          {visibleShortcuts.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-rose-400">
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>{t.quickShortcutsHeading}</span>
-                </div>
-                <span
-                  className={`text-xs ${
-                    isDark ? 'text-slate-500' : 'text-slate-400'
-                  }`}
-                >
-                  {visibleShortcuts.length}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {visibleShortcuts.map((sc) => (
-                  <WebShortcutCard
-                    key={sc.id}
-                    shortcut={sc}
-                    browsers={installedBrowsers}
-                    isDark={isDark}
-                    lang={lang}
-                    onLaunchShortcut={(item) => {
-                      const prof = resolveProfileObject(
-                        item.browserId,
-                        item.folderName,
-                        item.name
-                      );
-                      onLaunch(prof, item.name, item.url);
-                    }}
-                    onEditShortcut={(item) =>
-                      setWebShortcutModal({ open: true, editing: item })
-                    }
-                    onDeleteShortcut={handleDeleteShortcut}
-                    onCreateDesktopShortcut={(item) => {
-                      const prof = resolveProfileObject(
-                        item.browserId,
-                        item.folderName,
-                        item.name
-                      );
-                      onCreateShortcut(prof, item.name, item.url);
-                    }}
-                  />
-                ))}
-              </div>
             </div>
           )}
 
@@ -852,20 +718,6 @@ export function TrayPopupWindow({
             setGroupModalState({ open: true, mode: 'create' })
           }
           onClose={() => setManageGroupsOpen(false)}
-        />
-      )}
-
-      {/* Modal 4: Create / Edit Custom Web / TikTok Shortcut Card */}
-      {webShortcutModal.open && (
-        <WebShortcutModal
-          browsers={installedBrowsers}
-          customGroups={settings.customGroups}
-          groupIcons={groupIcons}
-          initialShortcut={webShortcutModal.editing}
-          isDark={isDark}
-          lang={lang}
-          onSave={handleSaveShortcut}
-          onClose={() => setWebShortcutModal({ open: false, editing: null })}
         />
       )}
     </section>
