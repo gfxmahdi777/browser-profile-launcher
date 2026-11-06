@@ -75,6 +75,7 @@ export const TRANSLATIONS = {
     updateReadyPrompt: 'Update ready to install. Restart now?',
     restartAndInstallBtn: 'Restart & Install Now',
     upToDateMsg: 'App is up to date',
+    updateErrorMsg: 'Update check failed or no updates available',
   },
   bn: {
     appTitle: 'ব্রাউজার প্রোফাইল লঞ্চার',
@@ -150,5 +151,6 @@ export const TRANSLATIONS = {
     updateReadyPrompt: 'নতুন আপডেট ইনস্টলের জন্য প্রস্তুত। এখনই রিস্টার্ট করবেন?',
     restartAndInstallBtn: 'এখনই রিস্টার্ট ও ইনস্টল করুন',
     upToDateMsg: 'আপনার অ্যাপটি আপ-টু-ডেট আছে',
+    updateErrorMsg: 'আপডেট চেক করা যায়নি অথবা কোনো নতুন আপডেট নেই',
   },
 };

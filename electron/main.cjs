@@ -16846,13 +16846,16 @@ var watcher = null;
 var startHidden = process.argv.includes("--hidden");
 var settingsManager = new SettingsManager(import_electron.app.getPath("userData"));
 var SAFE_SANDBOX_DIR = import_node_path6.default.join(import_electron.app.getPath("temp"), "bpl-sandbox-test");
+var isManualUpdateCheck = false;
 function sendUpdateStatus(payload) {
   mainWindow?.webContents.send("update-status", payload);
 }
 function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = null;
   autoUpdater.on("checking-for-update", () => {
+    if (!isManualUpdateCheck) return;
     sendUpdateStatus({
       status: "checking",
       message: "Checking for updates..."
@@ -16866,6 +16869,8 @@ function setupAutoUpdater() {
     });
   });
   autoUpdater.on("update-not-available", (info) => {
+    if (!isManualUpdateCheck) return;
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: "up-to-date",
       version: info?.version,
@@ -16881,6 +16886,7 @@ function setupAutoUpdater() {
     });
   });
   autoUpdater.on("update-downloaded", (info) => {
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: "downloaded",
       version: info?.version,
@@ -16888,26 +16894,39 @@ function setupAutoUpdater() {
       message: `Update v${info?.version || "new"} ready to install. Restart now?`
     });
   });
-  autoUpdater.on("error", (err) => {
+  autoUpdater.on("error", () => {
+    if (!isManualUpdateCheck) {
+      sendUpdateStatus({ status: "idle" });
+      return;
+    }
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: "error",
-      message: err?.message || "Could not check for updates."
+      message: "Update check failed or no updates available"
     });
   });
 }
-function triggerUpdateCheck() {
+function triggerUpdateCheck(manual = false) {
+  isManualUpdateCheck = manual;
   if (!import_electron.app.isPackaged) {
-    sendUpdateStatus({
-      status: "up-to-date",
-      version: import_electron.app.getVersion(),
-      message: "Development build \u2014 auto-updates run in packaged .exe."
-    });
+    if (manual) {
+      sendUpdateStatus({
+        status: "up-to-date",
+        version: import_electron.app.getVersion(),
+        message: "App is up to date"
+      });
+    }
     return;
   }
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {
+    if (!isManualUpdateCheck) {
+      sendUpdateStatus({ status: "idle" });
+      return;
+    }
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: "error",
-      message: err instanceof Error ? err.message : String(err)
+      message: "Update check failed or no updates available"
     });
   });
 }
@@ -16997,7 +17016,7 @@ function createWindow(forceShow = false) {
     }
     if (import_electron.app.isPackaged) {
       setTimeout(() => {
-        triggerUpdateCheck();
+        triggerUpdateCheck(false);
       }, 1500);
     }
   });
@@ -17039,7 +17058,7 @@ function updateTrayContextMenu() {
       label: "Check for Updates",
       click: () => {
         showAndFocusMainWindow();
-        triggerUpdateCheck();
+        triggerUpdateCheck(true);
       }
     },
     {
@@ -17078,7 +17097,7 @@ function setupIpc() {
     };
   });
   import_electron.ipcMain.handle("check-for-updates", () => {
-    triggerUpdateCheck();
+    triggerUpdateCheck(true);
     return { ok: true };
   });
   import_electron.ipcMain.handle("quit-and-install-update", () => {

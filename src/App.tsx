@@ -74,9 +74,30 @@ export default function App() {
       setDetection(updatedDetection);
     });
 
-    // Subscribe to electron-updater status events
+    // Subscribe to electron-updater status events (sanitize errors, never expose raw HTTP/404 strings)
     const unsubscribeUpdates = subscribeToUpdateStatus((statusPayload) => {
+      if (!statusPayload || statusPayload.status === 'idle') {
+        setUpdateStatus(null);
+        return;
+      }
+      if (statusPayload.status === 'error') {
+        setUpdateStatus({
+          status: 'error',
+          message: 'Update check failed or no updates available',
+        });
+        setTimeout(() => {
+          setUpdateStatus((curr) => (curr?.status === 'error' ? null : curr));
+        }, 4000);
+        return;
+      }
       setUpdateStatus(statusPayload);
+      if (statusPayload.status === 'up-to-date') {
+        setTimeout(() => {
+          setUpdateStatus((curr) =>
+            curr?.status === 'up-to-date' ? null : curr
+          );
+        }, 3500);
+      }
     });
 
     return () => {
@@ -255,13 +276,28 @@ export default function App() {
   };
 
   const handleCheckUpdates = async () => {
-    if (isElectron) {
-      await checkForAppUpdates();
-    } else {
+    try {
+      if (isElectron) {
+        await checkForAppUpdates();
+      } else {
+        setUpdateStatus({
+          status: 'up-to-date',
+          version: '1.0.0',
+        });
+        setTimeout(() => {
+          setUpdateStatus((curr) =>
+            curr?.status === 'up-to-date' ? null : curr
+          );
+        }, 3500);
+      }
+    } catch {
       setUpdateStatus({
-        status: 'up-to-date',
-        version: '1.0.0',
+        status: 'error',
+        message: 'Update check failed or no updates available',
       });
+      setTimeout(() => {
+        setUpdateStatus((curr) => (curr?.status === 'error' ? null : curr));
+      }, 4000);
     }
   };
 

@@ -40,6 +40,8 @@ const settingsManager = new SettingsManager(app.getPath('userData'));
 // Isolated temporary sandbox folder for safe test profile creation
 const SAFE_SANDBOX_DIR = path.join(app.getPath('temp'), 'bpl-sandbox-test');
 
+let isManualUpdateCheck = false;
+
 function sendUpdateStatus(payload: UpdateStatusPayload) {
   mainWindow?.webContents.send('update-status', payload);
 }
@@ -47,8 +49,11 @@ function sendUpdateStatus(payload: UpdateStatusPayload) {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Disable electron-updater's noisy default logger on 404/private repos
+  autoUpdater.logger = null;
 
   autoUpdater.on('checking-for-update', () => {
+    if (!isManualUpdateCheck) return;
     sendUpdateStatus({
       status: 'checking',
       message: 'Checking for updates...',
@@ -64,6 +69,8 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    if (!isManualUpdateCheck) return;
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: 'up-to-date',
       version: info?.version,
@@ -81,6 +88,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: 'downloaded',
       version: info?.version,
@@ -89,27 +97,44 @@ function setupAutoUpdater() {
     });
   });
 
-  autoUpdater.on('error', (err) => {
+  autoUpdater.on('error', () => {
+    // Never dump raw HTTP 404 / releases.atom stack traces to the UI.
+    // If this was an automatic background startup check, fail completely silently.
+    if (!isManualUpdateCheck) {
+      sendUpdateStatus({ status: 'idle' });
+      return;
+    }
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: 'error',
-      message: err?.message || 'Could not check for updates.',
+      message: 'Update check failed or no updates available',
     });
   });
 }
 
-function triggerUpdateCheck() {
+function triggerUpdateCheck(manual = false) {
+  isManualUpdateCheck = manual;
+
   if (!app.isPackaged) {
-    sendUpdateStatus({
-      status: 'up-to-date',
-      version: app.getVersion(),
-      message: 'Development build — auto-updates run in packaged .exe.',
-    });
+    if (manual) {
+      sendUpdateStatus({
+        status: 'up-to-date',
+        version: app.getVersion(),
+        message: 'App is up to date',
+      });
+    }
     return;
   }
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {
+    if (!isManualUpdateCheck) {
+      sendUpdateStatus({ status: 'idle' });
+      return;
+    }
+    isManualUpdateCheck = false;
     sendUpdateStatus({
       status: 'error',
-      message: err instanceof Error ? err.message : String(err),
+      message: 'Update check failed or no updates available',
     });
   });
 }
@@ -212,10 +237,10 @@ function createWindow(forceShow = false) {
       mainWindow.focus();
     }
 
-    // Automatically check for updates on GitHub Releases once window is ready
+    // Automatically check for updates on GitHub Releases once window is ready (silently in background)
     if (app.isPackaged) {
       setTimeout(() => {
-        triggerUpdateCheck();
+        triggerUpdateCheck(false);
       }, 1500);
     }
   });
@@ -267,7 +292,7 @@ function updateTrayContextMenu() {
       label: 'Check for Updates',
       click: () => {
         showAndFocusMainWindow();
-        triggerUpdateCheck();
+        triggerUpdateCheck(true);
       },
     },
     {
@@ -310,7 +335,7 @@ function setupIpc() {
   });
 
   ipcMain.handle('check-for-updates', () => {
-    triggerUpdateCheck();
+    triggerUpdateCheck(true);
     return { ok: true };
   });
 

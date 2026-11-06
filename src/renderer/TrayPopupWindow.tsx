@@ -420,57 +420,59 @@ export function TrayPopupWindow({
         </div>
       </div>
 
-      {/* Built-in Auto-Updater Notification Banner */}
+      {/* Compact, Dismissible Auto-Updater Toast Notification (Never breaks layout or dumps raw errors) */}
       {updateStatus && updateStatus.status !== 'idle' && (
         <div
-          className={`px-6 py-2.5 text-xs font-medium shrink-0 border-b ${
+          role="status"
+          aria-live="polite"
+          className={`fixed bottom-4 right-4 z-50 max-w-sm rounded-xl px-3.5 py-2.5 text-xs font-medium shadow-xl border flex items-center justify-between gap-3 transition-all ${
             updateStatus.status === 'downloaded'
               ? 'bg-blue-600 text-white border-blue-500'
-              : updateStatus.status === 'error'
-              ? 'bg-amber-600 text-white border-amber-500'
               : isDark
-              ? 'bg-slate-900 text-slate-200 border-slate-800'
-              : 'bg-blue-50 text-blue-900 border-blue-200'
+              ? 'bg-slate-900/95 text-slate-200 border-slate-700/90 backdrop-blur'
+              : 'bg-white/95 text-slate-800 border-slate-200 backdrop-blur'
           }`}
         >
-          <div className="w-full max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Download className="w-3.5 h-3.5 shrink-0" />
-              <span>
-                {updateStatus.status === 'checking'
-                  ? t.updateChecking
-                  : updateStatus.status === 'downloading'
-                  ? `${t.updateDownloading} (${updateStatus.progress ?? 0}%)`
-                  : updateStatus.status === 'downloaded'
-                  ? t.updateReadyPrompt
-                  : updateStatus.status === 'up-to-date'
-                  ? `${t.upToDateMsg}${
-                      updateStatus.version ? ` (v${updateStatus.version})` : ''
-                    }`
-                  : updateStatus.message}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {updateStatus.status === 'downloaded' && onInstallUpdate && (
-                <button
-                  type="button"
-                  onClick={onInstallUpdate}
-                  className="px-3 py-1 rounded-lg bg-white text-blue-700 hover:bg-blue-50 font-semibold transition cursor-pointer shadow-xs"
-                >
-                  {t.restartAndInstallBtn}
-                </button>
-              )}
-              {onDismissUpdate && (
-                <button
-                  type="button"
-                  onClick={onDismissUpdate}
-                  aria-label="Dismiss update notification"
-                  className="p-1 rounded hover:bg-black/15 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <Download className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+            <span className="truncate">
+              {updateStatus.status === 'checking'
+                ? t.updateChecking
+                : updateStatus.status === 'downloading'
+                ? `${t.updateDownloading} (${updateStatus.progress ?? 0}%)`
+                : updateStatus.status === 'downloaded'
+                ? t.updateReadyPrompt
+                : updateStatus.status === 'up-to-date'
+                ? `${t.upToDateMsg}${
+                    updateStatus.version ? ` (v${updateStatus.version})` : ''
+                  }`
+                : updateStatus.status === 'available'
+                ? `${t.updateDownloading}${
+                    updateStatus.version ? ` (v${updateStatus.version})` : ''
+                  }`
+                : t.updateErrorMsg}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {updateStatus.status === 'downloaded' && onInstallUpdate && (
+              <button
+                type="button"
+                onClick={onInstallUpdate}
+                className="px-2.5 py-1 rounded-lg bg-white text-blue-700 hover:bg-blue-50 font-semibold transition cursor-pointer shadow-xs"
+              >
+                {t.restartAndInstallBtn}
+              </button>
+            )}
+            {onDismissUpdate && (
+              <button
+                type="button"
+                onClick={onDismissUpdate}
+                aria-label="Dismiss update notification"
+                className="p-1 rounded-md hover:bg-slate-500/20 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       )}
